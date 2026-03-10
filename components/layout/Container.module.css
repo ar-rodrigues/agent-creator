@@ -1,0 +1,19 @@
+.container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: var(--space-4);
+  padding-right: var(--space-4);
+}
+
+.sm {
+  max-width: 28rem;
+}
+
+.md {
+  max-width: 42rem;
+}
+
+.lg {
+  max-width: 56rem;
+}

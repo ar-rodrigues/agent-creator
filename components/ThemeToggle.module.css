@@ -1,0 +1,39 @@
+.wrapper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.button:hover {
+  color: var(--color-text);
+  background: var(--color-surface-elevated);
+}
+
+.button[aria-pressed="true"] {
+  color: var(--color-primary);
+  background: var(--color-surface-elevated);
+}
+
+.icon {
+  width: 18px;
+  height: 18px;
+}

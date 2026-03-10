@@ -1,0 +1,37 @@
+{
+  "home": {
+    "title": "Bienvenido",
+    "subtitle": "Inicia sesión para acceder a tu panel, o crea una cuenta para comenzar.",
+    "signIn": "Iniciar sesión",
+    "signUp": "Registrarse"
+  },
+  "auth": {
+    "signIn": "Iniciar sesión",
+    "signUp": "Registrarse",
+    "resetPassword": "Restablecer contraseña",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "emailPlaceholder": "tu@ejemplo.com",
+    "passwordPlaceholder": "••••••••",
+    "enterEmail": "Introduce tu correo electrónico",
+    "validEmail": "Introduce un correo válido",
+    "enterPassword": "Introduce tu contraseña",
+    "choosePassword": "Elige una contraseña",
+    "passwordMinLength": "La contraseña debe tener al menos 6 caracteres",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "backToSignIn": "Volver a iniciar sesión",
+    "sendResetLink": "Enviar enlace de restablecimiento",
+    "checkEmail": "Revisa tu correo",
+    "checkEmailDescription": "Enviamos un enlace de confirmación. Haz clic para activar tu cuenta y luego inicia sesión.",
+    "emailSent": "Correo enviado",
+    "emailSentDescription": "Si existe una cuenta con ese correo, recibirás un enlace para restablecer la contraseña.",
+    "backToHome": "Volver al inicio",
+    "signedInSuccess": "Sesión iniciada correctamente",
+    "checkEmailConfirm": "Revisa tu correo para confirmar tu cuenta",
+    "accountCreated": "Cuenta creada",
+    "resetLinkSent": "Revisa tu correo para el enlace de restablecimiento",
+    "checkEmailPageTitle": "Revisa tu correo",
+    "checkEmailPageDescription": "Enviamos un enlace de confirmación a tu correo. Haz clic en el enlace para activar tu cuenta y luego inicia sesión.",
+    "signInNow": "Iniciar sesión"
+  }
+}
