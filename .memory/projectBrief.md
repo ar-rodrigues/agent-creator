@@ -87,6 +87,28 @@ The long‑term goal is that a user can upload files, define reusable skills, co
   - Always separate **general** company knowledge from **project/agent‑specific** knowledge.
   - A given agent’s RAG context is the **union** of the knowledge spaces that are explicitly attached to it.
 
+### Organizations & Multi-tenant Model
+
+- The product is **multi-tenant**: users work inside **organizations** that own agents, skills, knowledge spaces, and runs.
+- **Organization**
+  - Represents a tenant/workspace.
+  - Owns:
+    - Agents.
+    - Skills.
+    - Knowledge spaces and underlying files.
+    - Agent/crew runs and their results.
+- **User & membership**
+  - Users are identified by Supabase `auth.users`.
+  - A **membership** links a user to an organization with a **role**:
+    - `owner` – full control of the organization, including settings and (future) seat limits.
+    - `admin` – manage agents/skills/knowledge spaces, invite/remove members within seat limits.
+    - `member` – create and edit agents, skills, and knowledge spaces within the org.
+    - `viewer` – read-only access to configurations and run results.
+- **Seats**
+  - Conceptually, a **seat** is an occupied membership slot in an org.
+  - For Phase 1, the **number of active non-viewer memberships** is effectively the number of seats.
+  - Billing / Stripe integration is **out of scope for Phase 1**, but this model is designed to support per-seat billing later.
+
 ### Roadmap / Open Questions
 
 - How exactly “Skills”, “Agents”, and “Knowledge spaces” are modelled in the database (schema details, relations).
@@ -94,9 +116,9 @@ The long‑term goal is that a user can upload files, define reusable skills, co
   - Is it a specific library to integrate, or more of a product concept layered on top of CrewAI?
 - Which embedding model(s) to use:
   - Via Ollama, Supabase, or another local/hosted embedding model.
-- Finalize how organizations, seats, and **Phase 1 core features** map onto this agent/skill/knowledge model (see separate orgs/seats & phase‑1 planning).
+- Finalize how organizations, seats, and **Phase 1 core features** map onto this agent/skill/knowledge model (see orgs/seats & phase‑1 planning captured in `.cursor/plans/orgs-seats-and-phase1-core_*.plan.md`).
 
-> TODO (maintainer): Once product requirements and orgs/seats/phase‑1 decisions are finalized, update this brief so it becomes the authoritative source of **what** we are building and **why**.
+> TODO (maintainer): Once product requirements and orgs/seats/phase‑1 decisions are implemented, update this brief so it becomes the authoritative source of **what** we are building and **why**.
 
 ## Project Brief – Agent Creator
 

@@ -24,6 +24,9 @@
 # SQL 
 /sql
 
+# Supabase
+/supabase/migrations
+
 # production
 /build
 

@@ -44,6 +44,17 @@
   - A group of agents with different roles and skills working together on a task.
   - Orchestrated via CrewAI (or similar).
 
+- **Organization**
+  - A tenant/workspace that owns agents, skills, knowledge spaces, and runs.
+  - All agent and skill configurations are scoped to a single organization.
+- **Membership**
+  - Links a Supabase auth user to an organization with a **role**:
+    - `owner`, `admin`, `member`, `viewer`.
+  - A user can belong to multiple organizations via separate memberships.
+- **Seat**
+  - Conceptually, a seat is an **active non-viewer membership** in an organization.
+  - Phase 1 uses seat counts mainly for permissions and future billing readiness; billing itself is deferred.
+
 ---
 
 ### Current / Intended User Flows
@@ -131,6 +142,20 @@ This section focuses on **product behavior**, not low‑level implementation.
   - Useful for:
     - Decomposing large analyses.
     - Having separate “analyst”, “checker”, and “writer” agents.
+
+#### 5. Organizations, members, and seats (planned Phase 1 behavior)
+
+- **Create or join an organization** (planned)
+  - When a user signs in for the first time, they can:
+    - Create a new organization (becoming its `owner`), or
+    - Accept an invitation to an existing organization.
+- **Invite members and manage seats** (planned)
+  - Owners/admins can invite other users by email and assign them roles.
+  - The total number of active non-viewer memberships represents the org’s seat usage.
+  - Billing and hard seat enforcement are planned for later phases.
+- **Switch organizations** (planned)
+  - If a user belongs to multiple organizations, they can switch the **active organization** in the UI.
+  - All visible agents, skills, knowledge spaces, and runs are filtered by the currently selected organization.
 
 ---
 
