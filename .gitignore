@@ -19,8 +19,10 @@
 
 # Cursor
 .cursorrules
-
 .cursor
+
+# SQL 
+/sql
 
 # production
 /build
