@@ -7,7 +7,6 @@ export type OrgMember = {
   user_id: string;
   email: string | null;
   display_name: string | null;
-  role: string;
   seat_type_key: string | null;
   seat_type_name: string | null;
   created_at: string;

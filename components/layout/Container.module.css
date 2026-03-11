@@ -17,3 +17,7 @@
 .lg {
   max-width: 56rem;
 }
+
+.xl {
+  max-width: 80rem;
+}

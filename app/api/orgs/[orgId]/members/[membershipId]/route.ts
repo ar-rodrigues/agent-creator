@@ -25,17 +25,12 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const body = (await request.json().catch(() => null)) as {
-    role?: string;
     seat_type_key?: string;
   } | null;
-  const role = body?.role?.trim()?.toLowerCase();
   const seatTypeKey = body?.seat_type_key?.trim()?.toUpperCase();
 
-  if (!role && !seatTypeKey) {
-    return NextResponse.json({ error: "role or seat_type_key is required" }, { status: 400 });
-  }
-  if (role && role !== "admin" && role !== "member") {
-    return NextResponse.json({ error: "role must be admin or member" }, { status: 400 });
+  if (!seatTypeKey) {
+    return NextResponse.json({ error: "seat_type_key is required" }, { status: 400 });
   }
   if (seatTypeKey && seatTypeKey !== "ADMIN" && seatTypeKey !== "USER") {
     return NextResponse.json({ error: "seat_type_key must be ADMIN or USER" }, { status: 400 });
@@ -43,7 +38,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const { data: membership, error: fetchErr } = await supabase
     .from("org_memberships")
-    .select("id, org_id, user_id, role")
+    .select("id, org_id, user_id, role_id")
     .eq("id", membershipId)
     .eq("org_id", orgId)
     .single();
@@ -52,20 +47,25 @@ export async function PATCH(request: Request, { params }: Params) {
     return NextResponse.json({ error: "Membership not found" }, { status: 404 });
   }
 
-  const updates: { role?: string } = {};
-  if (role) updates.role = role;
+  if (seatTypeKey) {
+    const roleKey = seatTypeKey === "ADMIN" ? "admin" : "member";
+    const { data: roleRow, error: roleErr } = await supabase
+      .from("roles")
+      .select("id")
+      .eq("key", roleKey)
+      .single();
+    if (roleErr || !roleRow?.id) {
+      return NextResponse.json({ error: roleErr?.message ?? "Role not found" }, { status: 500 });
+    }
 
-  if (Object.keys(updates).length > 0) {
     const { error: updateErr } = await supabase
       .from("org_memberships")
-      .update(updates)
+      .update({ role_id: roleRow.id })
       .eq("id", membershipId);
     if (updateErr) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
-  }
 
-  if (seatTypeKey) {
     const { data: newSeatType } = await supabase
       .from("seat_types")
       .select("id")
@@ -122,7 +122,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const { data: updated } = await supabase
     .from("org_memberships")
-    .select("id, user_id, role, created_at")
+    .select("id, user_id, role_id, created_at")
     .eq("id", membershipId)
     .single();
 

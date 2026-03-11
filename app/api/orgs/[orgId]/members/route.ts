@@ -26,7 +26,7 @@ export async function GET(_request: Request, { params }: Params) {
 
   const { data: memberships, error: memErr } = await supabase
     .from("org_memberships")
-    .select("id, user_id, role, created_at")
+    .select("id, user_id, role_id, created_at")
     .eq("org_id", orgId)
     .order("created_at", { ascending: true });
 
@@ -83,7 +83,6 @@ export async function GET(_request: Request, { params }: Params) {
       user_id: m.user_id,
       email: profile?.email ?? null,
       display_name: profile?.display_name ?? null,
-      role: m.role,
       seat_type_key: seat?.key ?? null,
       seat_type_name: seat?.name ?? null,
       created_at: m.created_at,
@@ -196,14 +195,22 @@ export async function POST(request: Request, { params }: Params) {
     .select("id", { count: "exact", head: true })
     .eq("org_seat_id", orgSeat.id);
   if ((assigned ?? 0) >= maxUsers) {
-    return NextResponse.json({ error: "No seats available for this role" }, { status: 400 });
+    return NextResponse.json({ error: "No seats available for this seat type" }, { status: 400 });
   }
 
-  const role = seatTypeKey === "ADMIN" ? "admin" : "member";
+  const roleKey = seatTypeKey === "ADMIN" ? "admin" : "member";
+  const { data: roleRow, error: roleErr } = await supabase
+    .from("roles")
+    .select("id")
+    .eq("key", roleKey)
+    .single();
+  if (roleErr || !roleRow?.id) {
+    return NextResponse.json({ error: roleErr?.message ?? "Role not found" }, { status: 500 });
+  }
   const { data: membership, error: memErr } = await supabase
     .from("org_memberships")
-    .insert({ org_id: orgId, user_id: inviteeId, role })
-    .select("id, user_id, role, created_at")
+    .insert({ org_id: orgId, user_id: inviteeId, role_id: roleRow.id })
+    .select("id, user_id, role_id, created_at")
     .single();
 
   if (memErr) {
@@ -231,7 +238,6 @@ export async function POST(request: Request, { params }: Params) {
         user_id: membership.user_id,
         email: profileRow.data?.email ?? null,
         display_name: profileRow.data?.display_name ?? null,
-        role: membership.role,
         seat_type_key: seatTypeKey,
         created_at: membership.created_at,
       },

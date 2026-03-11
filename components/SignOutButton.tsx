@@ -1,10 +1,12 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "antd";
 import { useAuth } from "@/hooks/useAuth";
 
 export function SignOutButton() {
+  const t = useTranslations("common");
   const router = useRouter();
   const { signOut } = useAuth();
 
@@ -16,7 +18,7 @@ export function SignOutButton() {
 
   return (
     <Button type="default" onClick={handleSignOut}>
-      Sign out
+      {t("signOut")}
     </Button>
   );
 }

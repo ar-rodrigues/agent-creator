@@ -1,17 +1,17 @@
 "use client";
 
-import {useRouter} from "next/navigation";
-import {useEffect} from "react";
-import {useCurrentOrganization} from "@/hooks/useCurrentOrganization";
+import { useTranslations } from "next-intl";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 
 export default function DashboardPage() {
+  const t = useTranslations("dashboard");
   const router = useRouter();
-  const {organizations, loading, currentOrganization} = useCurrentOrganization();
+  const { organizations, loading, currentOrganization } = useCurrentOrganization();
 
   useEffect(() => {
-    if (loading) {
-      return;
-    }
+    if (loading) return;
     if (!organizations || organizations.length === 0) {
       router.push("/org/create");
     }
@@ -19,15 +19,15 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1>Dashboard</h1>
+      <h1>{t("title")}</h1>
       {loading && !currentOrganization ? (
-        <p>Loading…</p>
+        <p>{t("loading")}</p>
       ) : currentOrganization ? (
-        <p>Current organization: {currentOrganization.name}</p>
+        <p>{t("currentOrganization", { name: currentOrganization.name })}</p>
       ) : (
-        <p>Select or create an organization to get started.</p>
+        <p>{t("selectOrCreateOrg")}</p>
       )}
-      <p>Private dashboard content. Add more modules under (private) as needed.</p>
+      <p>{t("privateContent")}</p>
     </div>
   );
 }

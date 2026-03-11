@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { App, Button, Form, Input, Modal, Popconfirm, Select, Table } from "antd";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -11,12 +12,13 @@ import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/layout/Container";
 import { Stack } from "@/components/layout/Stack";
 
-const SEAT_OPTIONS = [
-  { label: "Admin", value: "ADMIN" },
-  { label: "User", value: "USER" },
+const getSeatOptions = (t: (key: string) => string) => [
+  { label: t("seatAdmin"), value: "ADMIN" },
+  { label: t("seatUser"), value: "USER" },
 ];
 
 export default function OrgSettingsPage() {
+  const t = useTranslations("orgSettings");
   const { message } = App.useApp();
   const { currentOrgId, currentOrganization } = useCurrentOrganization();
   const { can } = usePermissions(currentOrgId);
@@ -44,13 +46,13 @@ export default function OrgSettingsPage() {
     setSavingName(true);
     try {
       await update({ name });
-      message.success("Organization name updated");
+      message.success(t("nameUpdated"));
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Failed to update");
+      message.error(err instanceof Error ? err.message : t("updateFailed"));
     } finally {
       setSavingName(false);
     }
-  }, [currentOrgId, update, message, nameForm]);
+  }, [currentOrgId, update, message, nameForm, t]);
 
   const handleInvite = useCallback(async () => {
     if (!currentOrgId || !inviteEmail.trim()) return;
@@ -65,41 +67,41 @@ export default function OrgSettingsPage() {
         const payload = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(payload?.error ?? "Invite failed");
       }
-      message.success("Member added");
+      message.success(t("memberAdded"));
       setInviteModalOpen(false);
       setInviteEmail("");
       setInviteSeat("USER");
       refetchMembers();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Invite failed");
+      message.error(err instanceof Error ? err.message : t("inviteFailed"));
     } finally {
       setInviting(false);
     }
-  }, [currentOrgId, inviteEmail, inviteSeat, message, refetchMembers]);
+  }, [currentOrgId, inviteEmail, inviteSeat, message, refetchMembers, t]);
 
-  const handleUpdateMember = useCallback(
-    async (membershipId: string, role: string, seat_type_key: string) => {
+  const handleUpdateMemberSeat = useCallback(
+    async (membershipId: string, seat_type_key: string) => {
       if (!currentOrgId) return;
       setUpdatingMemberId(membershipId);
       try {
         const res = await fetch(`/api/orgs/${currentOrgId}/members/${membershipId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: role.toLowerCase(), seat_type_key }),
+          body: JSON.stringify({ seat_type_key }),
         });
         if (!res.ok) {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(payload?.error ?? "Update failed");
         }
-        message.success("Member updated");
+        message.success(t("memberUpdated"));
         refetchMembers();
       } catch (err) {
-        message.error(err instanceof Error ? err.message : "Update failed");
+        message.error(err instanceof Error ? err.message : t("updateFailed"));
       } finally {
         setUpdatingMemberId(null);
       }
     },
-    [currentOrgId, message, refetchMembers],
+    [currentOrgId, message, refetchMembers, t],
   );
 
   const handleRemoveMember = useCallback(
@@ -113,53 +115,32 @@ export default function OrgSettingsPage() {
           const payload = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(payload?.error ?? "Remove failed");
         }
-        message.success("Member removed");
+        message.success(t("memberRemoved"));
         refetchMembers();
       } catch (err) {
-        message.error(err instanceof Error ? err.message : "Remove failed");
+        message.error(err instanceof Error ? err.message : t("removeFailed"));
       }
     },
-    [currentOrgId, message, refetchMembers],
+    [currentOrgId, message, refetchMembers, t],
   );
 
   if (!currentOrganization) {
     return (
-      <Container>
-        <p>Select an organization to view settings.</p>
+      <Container size="xl">
+        <p>{t("selectOrg")}</p>
       </Container>
     );
   }
 
   const columns = [
     {
-      title: "Email",
+      title: t("email"),
       dataIndex: "email",
       key: "email",
       render: (email: string | null, row: OrgMember) => email ?? row.display_name ?? row.user_id.slice(0, 8) + "...",
     },
     {
-      title: "Role",
-      dataIndex: "role",
-      key: "role",
-      render: (role: string, row: OrgMember) =>
-        canManage ? (
-          <Select
-            size="small"
-            style={{ width: 100 }}
-            value={role}
-            loading={updatingMemberId === row.id}
-            options={[
-              { label: "Admin", value: "admin" },
-              { label: "Member", value: "member" },
-            ]}
-            onChange={(v) => handleUpdateMember(row.id, v, v === "admin" ? "ADMIN" : "USER")}
-          />
-        ) : (
-          role
-        ),
-    },
-    {
-      title: "Seat",
+      title: t("seat"),
       dataIndex: "seat_type_name",
       key: "seat_type",
       render: (name: string | null, row: OrgMember) =>
@@ -169,11 +150,11 @@ export default function OrgSettingsPage() {
             style={{ width: 100 }}
             value={row.seat_type_key ?? "USER"}
             loading={updatingMemberId === row.id}
-            options={SEAT_OPTIONS}
-            onChange={(v) => handleUpdateMember(row.id, row.role, v)}
+            options={getSeatOptions(t)}
+            onChange={(v) => handleUpdateMemberSeat(row.id, v)}
           />
         ) : (
-          name ?? "User"
+          name ?? t("seatUser")
         ),
     },
     ...(canManage
@@ -183,11 +164,11 @@ export default function OrgSettingsPage() {
             key: "actions",
             render: (_: unknown, row: OrgMember) => (
               <Popconfirm
-                title="Remove this member?"
+                title={t("removeConfirm")}
                 onConfirm={() => handleRemoveMember(row.id)}
               >
                 <Button type="link" danger size="small">
-                  Remove
+                  {t("remove")}
                 </Button>
               </Popconfirm>
             ),
@@ -197,21 +178,21 @@ export default function OrgSettingsPage() {
   ];
 
   return (
-    <Container>
+    <Container size="xl">
       <Stack gap="lg">
-        <h1>Organization settings</h1>
+        <h1>{t("title")}</h1>
         {(orgError || membersError) && (
           <p style={{ color: "var(--color-error)" }}>{orgError ?? membersError}</p>
         )}
 
         <Card>
           <Stack gap="md">
-            <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Details</h2>
+            <h2 style={{ margin: 0, fontSize: "1.1rem" }}>{t("details")}</h2>
             {orgLoading ? (
-              <p>Loading…</p>
+              <p>{t("loading")}</p>
             ) : org ? (
               <Form form={nameForm} layout="vertical" initialValues={{ name: org.name }}>
-                <Form.Item label="Organization name" name="name">
+                <Form.Item label={t("orgName")} name="name">
                   <Input
                     disabled={!canManage}
                     onBlur={() => canManage && void handleSaveName()}
@@ -220,14 +201,14 @@ export default function OrgSettingsPage() {
                 </Form.Item>
                 {canManage && (
                   <Button type="primary" loading={savingName} onClick={() => void handleSaveName()}>
-                    Save name
+                    {t("saveName")}
                   </Button>
                 )}
               </Form>
             ) : null}
             {org && (
-              <p style={{ margin: 0, color: "var(--color-text-secondary)", fontSize: 14 }}>
-                Created {new Date(org.created_at).toLocaleDateString()}
+              <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: 14 }}>
+                {t("created")} {new Date(org.created_at).toLocaleDateString()}
               </p>
             )}
           </Stack>
@@ -236,10 +217,10 @@ export default function OrgSettingsPage() {
         <Card>
           <Stack gap="md">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-              <h2 style={{ margin: 0, fontSize: "1.1rem" }}>Members</h2>
+              <h2 style={{ margin: 0, fontSize: "1.1rem" }}>{t("members")}</h2>
               {canManage && (
                 <Button type="primary" onClick={() => setInviteModalOpen(true)}>
-                  Invite member
+                  {t("inviteMember")}
                 </Button>
               )}
             </div>
@@ -255,7 +236,7 @@ export default function OrgSettingsPage() {
       </Stack>
 
       <Modal
-        title="Invite member"
+        title={t("inviteModalTitle")}
         open={inviteModalOpen}
         onOk={() => void handleInvite()}
         onCancel={() => setInviteModalOpen(false)}
@@ -264,21 +245,21 @@ export default function OrgSettingsPage() {
       >
         <Stack gap="md">
           <div>
-            <label style={{ display: "block", marginBottom: 4 }}>Email</label>
+            <label style={{ display: "block", marginBottom: 4 }}>{t("email")}</label>
             <Input
               type="email"
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="colleague@example.com"
+              placeholder={t("emailPlaceholder")}
             />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: 4 }}>Seat type</label>
+            <label style={{ display: "block", marginBottom: 4 }}>{t("seatType")}</label>
             <Select
               style={{ width: "100%" }}
               value={inviteSeat}
               onChange={setInviteSeat}
-              options={SEAT_OPTIONS}
+              options={getSeatOptions(t)}
             />
           </div>
         </Stack>

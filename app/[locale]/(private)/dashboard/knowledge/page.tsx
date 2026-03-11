@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslations } from "next-intl";
 import { App, Button, Modal, Table, Upload } from "antd";
 import type { UploadFile } from "antd";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
@@ -11,6 +12,7 @@ import { Container } from "@/components/layout/Container";
 import { Stack } from "@/components/layout/Stack";
 
 export default function KnowledgePage() {
+  const t = useTranslations("knowledge");
   const { message } = App.useApp();
   const { currentOrgId, currentOrganization } = useCurrentOrganization();
   const { can } = usePermissions(currentOrgId);
@@ -45,17 +47,17 @@ export default function KnowledgePage() {
         const payload = (await res.json().catch(() => null)) as { error?: string } | null;
         throw new Error(payload?.error ?? "Failed to create");
       }
-      message.success("Knowledge space created");
+      message.success(t("spaceCreated"));
       setCreateModalOpen(false);
       setCreateName("");
       setCreateScope("general");
       refetch();
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Failed to create");
+      message.error(err instanceof Error ? err.message : t("createFailed"));
     } finally {
       setCreating(false);
     }
-  }, [currentOrgId, createName, createScope, message, refetch]);
+  }, [currentOrgId, createName, createScope, message, refetch, t]);
 
   const handleUpload = useCallback(async () => {
     if (!currentOrgId || uploadFileList.length === 0) return;
@@ -76,35 +78,35 @@ export default function KnowledgePage() {
           throw new Error(payload?.error ?? "Upload failed");
         }
       }
-      message.success("Document(s) uploaded");
+      message.success(t("documentsUploaded"));
       setUploadModalOpen(false);
       setUploadFileList([]);
       setUploadSpaces([]);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Upload failed");
+      message.error(err instanceof Error ? err.message : t("uploadFailed"));
     } finally {
       setUploading(false);
     }
-  }, [currentOrgId, uploadFileList, uploadSpaces, message]);
+  }, [currentOrgId, uploadFileList, uploadSpaces, message, t]);
 
   if (!currentOrganization) {
     return (
-      <Container>
-        <p>Select an organization to manage knowledge spaces.</p>
+      <Container size="xl">
+        <p>{t("selectOrg")}</p>
       </Container>
     );
   }
 
   const columns = [
-    { title: "Name", dataIndex: "name", key: "name" },
-    { title: "Scope", dataIndex: "scope", key: "scope" },
-    { title: "Created", dataIndex: "created_at", key: "created_at", render: (t: string) => new Date(t).toLocaleDateString() },
+    { title: t("name"), dataIndex: "name", key: "name" },
+    { title: t("scope"), dataIndex: "scope", key: "scope" },
+    { title: t("created"), dataIndex: "created_at", key: "created_at", render: (d: string) => new Date(d).toLocaleDateString() },
   ];
 
   return (
-    <Container>
+    <Container size="xl">
       <Stack gap="lg">
-        <h1>Knowledge</h1>
+        <h1>{t("title")}</h1>
         {error && (
           <p style={{ color: "var(--color-error)" }}>{error}</p>
         )}
@@ -113,12 +115,12 @@ export default function KnowledgePage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {canCreate && (
                 <Button type="primary" onClick={() => setCreateModalOpen(true)}>
-                  Create knowledge space
+                  {t("createSpace")}
                 </Button>
               )}
               {canUpload && (
                 <Button onClick={() => setUploadModalOpen(true)}>
-                  Upload document
+                  {t("uploadDocument")}
                 </Button>
               )}
             </div>
@@ -129,6 +131,7 @@ export default function KnowledgePage() {
                 columns={columns}
                 rowKey="id"
                 pagination={false}
+                locale={{ emptyText: t("noData") }}
               />
             )}
           </Stack>
@@ -136,7 +139,7 @@ export default function KnowledgePage() {
       </Stack>
 
       <Modal
-        title="Create knowledge space"
+        title={t("createModalTitle")}
         open={createModalOpen}
         onOk={() => void handleCreate()}
         onCancel={() => setCreateModalOpen(false)}
@@ -145,31 +148,31 @@ export default function KnowledgePage() {
       >
         <Stack gap="md">
           <div>
-            <label style={{ display: "block", marginBottom: 4 }}>Name</label>
+            <label style={{ display: "block", marginBottom: 4 }}>{t("name")}</label>
             <input
               value={createName}
               onChange={(e) => setCreateName(e.target.value)}
-              placeholder="e.g. Company guidelines"
+              placeholder={t("namePlaceholder")}
               style={{ width: "100%", padding: 8 }}
             />
           </div>
           <div>
-            <label style={{ display: "block", marginBottom: 4 }}>Scope</label>
+            <label style={{ display: "block", marginBottom: 4 }}>{t("scope")}</label>
             <select
               value={createScope}
               onChange={(e) => setCreateScope(e.target.value as "general" | "project" | "agent")}
               style={{ width: "100%", padding: 8 }}
             >
-              <option value="general">General</option>
-              <option value="project">Project</option>
-              <option value="agent">Agent</option>
+              <option value="general">{t("scopeGeneral")}</option>
+              <option value="project">{t("scopeProject")}</option>
+              <option value="agent">{t("scopeAgent")}</option>
             </select>
           </div>
         </Stack>
       </Modal>
 
       <Modal
-        title="Upload document"
+        title={t("uploadModalTitle")}
         open={uploadModalOpen}
         onOk={() => void handleUpload()}
         onCancel={() => setUploadModalOpen(false)}
@@ -178,7 +181,7 @@ export default function KnowledgePage() {
       >
         <Stack gap="md">
           <div>
-            <label style={{ display: "block", marginBottom: 4 }}>File</label>
+            <label style={{ display: "block", marginBottom: 4 }}>{t("file")}</label>
             <Upload
               multiple
               fileList={uploadFileList}
@@ -190,12 +193,12 @@ export default function KnowledgePage() {
                 setUploadFileList((prev) => prev.filter((f) => f.uid !== file.uid));
               }}
             >
-              <Button>Select file(s)</Button>
+              <Button>{t("selectFiles")}</Button>
             </Upload>
           </div>
           {spaces && spaces.length > 0 && (
             <div>
-              <label style={{ display: "block", marginBottom: 4 }}>Knowledge spaces (optional)</label>
+              <label style={{ display: "block", marginBottom: 4 }}>{t("knowledgeSpacesOptional")}</label>
               <select
                 multiple
                 value={uploadSpaces}

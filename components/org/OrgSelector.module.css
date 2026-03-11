@@ -1,0 +1,43 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.select {
+  width: 100%;
+  min-width: 0;
+}
+
+.selectSkeleton {
+  width: 100%;
+  height: 32px;
+  background: var(--color-surface-elevated);
+  border-radius: var(--radius-md);
+}
+
+.popupFooter {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.popupLink {
+  font-size: var(--text-sm);
+  color: var(--color-link);
+}
+
+.popupLink:hover {
+  color: var(--color-link-hover);
+}
+
+.emptyHint {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.error {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-error);
+}
