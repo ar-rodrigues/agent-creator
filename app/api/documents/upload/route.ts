@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/permissions";
+import { indexDocumentTextForSpaces } from "@/lib/rag/chunking";
+import { embedChunksForDocument } from "@/lib/rag/embeddings";
 
 const BUCKET = "documents";
 
@@ -107,6 +109,27 @@ export async function POST(request: Request) {
       console.warn("document_knowledge_spaces insert error:", linkErr.message);
     }
   }
+
+  void indexDocumentTextForSpaces({
+    orgId: orgId.trim(),
+    documentId: doc.id,
+    storagePath: doc.storage_path,
+    contentType: file.type || null,
+    knowledgeSpaceIds,
+  })
+    .then(() =>
+      embedChunksForDocument({
+        orgId: orgId.trim(),
+        documentId: doc.id,
+        // Embedding version will be resolved by the Edge Function when omitted.
+      }),
+    )
+    .catch((err) => {
+      console.warn(
+        "Document indexing pipeline failed",
+        err instanceof Error ? err.message : err,
+      );
+    });
 
   return NextResponse.json(
     {

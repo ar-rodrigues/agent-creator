@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { App, Button, Form, Input, Modal, Popconfirm, Select, Table } from "antd";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
+import { useOrgModelConfig } from "@/hooks/useOrgModelConfig";
 import { useOrgMembers } from "@/hooks/useOrgMembers";
 import type { OrgMember } from "@/hooks/useOrgMembers";
+import { useOrgProviderSecrets } from "@/hooks/useOrgProviderSecrets";
 import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/layout/Container";
 import { Stack } from "@/components/layout/Stack";
@@ -24,6 +26,18 @@ export default function OrgSettingsPage() {
   const { can } = usePermissions(currentOrgId);
   const { data: org, loading: orgLoading, error: orgError, update } = useOrgSettings(currentOrgId);
   const { data: members, loading: membersLoading, error: membersError, refetch: refetchMembers } = useOrgMembers(currentOrgId);
+  const {
+    data: modelConfig,
+    loading: modelLoading,
+    error: modelError,
+    update: updateModelConfig,
+  } = useOrgModelConfig(currentOrgId);
+  const {
+    data: providerSecrets,
+    loading: providerSecretsLoading,
+    error: providerSecretsError,
+    update: updateProviderSecret,
+  } = useOrgProviderSecrets(currentOrgId);
 
   const [nameForm] = Form.useForm();
   const [inviteModalOpen, setInviteModalOpen] = useState(false);
@@ -32,12 +46,104 @@ export default function OrgSettingsPage() {
   const [inviting, setInviting] = useState(false);
   const [savingName, setSavingName] = useState(false);
   const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
+  const [savingModelConfig, setSavingModelConfig] = useState(false);
+  const [savingProvider, setSavingProvider] = useState<null | "openai" | "anthropic" | "google">(null);
+  const [chatProvider, setChatProvider] = useState("local");
+  const [chatModel, setChatModel] = useState("");
+  const [embeddingProvider, setEmbeddingProvider] = useState("local");
+  const [embeddingModel, setEmbeddingModel] = useState("");
+  const [chatProviderFilter, setChatProviderFilter] = useState<string | "all">("all");
+  const [embeddingProviderFilter, setEmbeddingProviderFilter] = useState<
+    string | "all"
+  >("all");
+  const [availableChatModels, setAvailableChatModels] = useState<
+    { provider: string; name: string; isLocal: boolean }[]
+  >([]);
+  const [availableEmbeddingModels, setAvailableEmbeddingModels] = useState<
+    { provider: string; name: string; dimension: number; isLocal: boolean; isAvailable: boolean }[]
+  >([]);
+  const [openaiKeyInput, setOpenaiKeyInput] = useState("");
+  const [anthropicKeyInput, setAnthropicKeyInput] = useState("");
+  const [googleKeyInput, setGoogleKeyInput] = useState("");
+  const [editingProvider, setEditingProvider] = useState<null | "openai" | "anthropic" | "google">(null);
 
   const canManage = can("ORG_MANAGE_MEMBERS");
 
   useEffect(() => {
     if (org?.name) nameForm.setFieldsValue({ name: org.name });
   }, [org?.name, nameForm]);
+
+  useEffect(() => {
+    if (!modelConfig) return;
+    setChatProvider(modelConfig.chatProvider || "local");
+    setChatModel(modelConfig.chatModel ?? "");
+    setEmbeddingProvider(modelConfig.embeddingProvider || "local");
+    setEmbeddingModel(modelConfig.embeddingModel || "");
+  }, [modelConfig]);
+
+  useEffect(() => {
+    if (!modelConfig) return;
+
+    if (modelConfig.chatModel && availableChatModels.length > 0) {
+      const matchedChat = availableChatModels.find(
+        (m) => m.name === modelConfig.chatModel,
+      );
+      if (matchedChat) {
+        setChatProvider(matchedChat.provider);
+        setChatProviderFilter(matchedChat.provider);
+      }
+    }
+
+    if (modelConfig.embeddingModel && availableEmbeddingModels.length > 0) {
+      const matchedEmbedding = availableEmbeddingModels.find(
+        (m) => m.name === modelConfig.embeddingModel,
+      );
+      if (matchedEmbedding) {
+        setEmbeddingProvider(matchedEmbedding.provider);
+        setEmbeddingProviderFilter(matchedEmbedding.provider);
+      }
+    }
+  }, [availableChatModels, availableEmbeddingModels, modelConfig]);
+
+  useEffect(() => {
+    if (!currentOrgId || !canManage) return;
+
+    let cancelled = false;
+
+    const loadModels = async () => {
+      try {
+        const res = await fetch(`/api/orgs/${currentOrgId}/models`);
+        if (!res.ok) return;
+        const payload = (await res.json().catch(() => null)) as
+          | {
+              embeddingModels?: {
+                provider: string;
+                name: string;
+                dimension: number;
+                isLocal: boolean;
+                isAvailable: boolean;
+              }[];
+              chatModels?: {
+                provider: string;
+                name: string;
+                isLocal: boolean;
+              }[];
+            }
+          | null;
+        if (!payload || cancelled) return;
+        setAvailableEmbeddingModels(payload.embeddingModels ?? []);
+        setAvailableChatModels(payload.chatModels ?? []);
+      } catch {
+        // Ignore model loading failures; UI will fall back to existing config values.
+      }
+    };
+
+    void loadModels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [canManage, currentOrgId]);
 
   const handleSaveName = useCallback(async () => {
     if (!currentOrgId) return;
@@ -103,6 +209,140 @@ export default function OrgSettingsPage() {
     },
     [currentOrgId, message, refetchMembers, t],
   );
+
+  const handleSaveProviderKey = useCallback(
+    async (provider: "openai" | "anthropic" | "google", apiKey: string) => {
+      if (!currentOrgId || !apiKey.trim()) return;
+      setSavingProvider(provider);
+      try {
+        await updateProviderSecret(provider, apiKey.trim());
+        message.success(t("providerKeySaved"));
+        setEditingProvider(null);
+        if (provider === "openai") setOpenaiKeyInput("");
+        if (provider === "anthropic") setAnthropicKeyInput("");
+        if (provider === "google") setGoogleKeyInput("");
+      } catch (err) {
+        message.error(
+          err instanceof Error ? err.message : t("providerKeySaveFailed"),
+        );
+      } finally {
+        setSavingProvider(null);
+      }
+    },
+    [
+      currentOrgId,
+      message,
+      t,
+      updateProviderSecret,
+    ],
+  );
+
+  const handleSaveModelConfig = useCallback(async () => {
+    if (!currentOrgId) return;
+    if (!chatProvider.trim() || !embeddingProvider.trim() || !embeddingModel.trim()) {
+      return;
+    }
+    setSavingModelConfig(true);
+    try {
+      await updateModelConfig({
+        chatProvider: chatProvider.trim(),
+        chatModel: chatModel.trim() ? chatModel.trim() : null,
+        embeddingProvider: embeddingProvider.trim(),
+        embeddingModel: embeddingModel.trim(),
+      });
+      message.success(t("modelConfigUpdated"));
+    } catch (err) {
+      message.error(
+        err instanceof Error ? err.message : t("modelConfigUpdateFailed"),
+      );
+    } finally {
+      setSavingModelConfig(false);
+    }
+  }, [
+    chatModel,
+    chatProvider,
+    currentOrgId,
+    embeddingModel,
+    embeddingProvider,
+    message,
+    t,
+    updateModelConfig,
+  ]);
+
+  const filteredChatOptions = useMemo(() => {
+    const base = availableChatModels.filter((m) =>
+      chatProviderFilter === "all" ? true : m.provider === chatProviderFilter,
+    );
+    return base.map((m) => ({
+      label: `${m.name} (${m.provider})`,
+      value: m.name,
+    }));
+  }, [availableChatModels, chatProviderFilter]);
+
+  const filteredEmbeddingOptions = useMemo(() => {
+    const base = availableEmbeddingModels.filter((m) => {
+      if (!m.isAvailable) return false;
+      if (embeddingProviderFilter === "all") return true;
+      return m.provider === embeddingProviderFilter;
+    });
+
+    return base.map((m) => ({
+      label: `${m.name} (${m.provider}, ${m.dimension}D)`,
+      value: m.name,
+    }));
+  }, [availableEmbeddingModels, embeddingProviderFilter]);
+
+  const chatProviderFilterOptions = useMemo(() => {
+    const providers = Array.from(new Set(availableChatModels.map((m) => m.provider)));
+    return [
+      { label: t("chatProviderAll"), value: "all" as const },
+      ...providers.map((p) => ({ label: p, value: p })),
+    ];
+  }, [availableChatModels, t]);
+
+  const embeddingProviderFilterOptions = useMemo(() => {
+    const providers = Array.from(
+      new Set(availableEmbeddingModels.map((m) => m.provider)),
+    );
+    return [
+      { label: t("embeddingProviderAll"), value: "all" as const },
+      ...providers.map((p) => ({ label: p, value: p })),
+    ];
+  }, [availableEmbeddingModels, t]);
+
+  const CLOUD_PROVIDERS = ["openai", "anthropic", "google"] as const;
+  const providerToKeyProvider: Record<string, (typeof CLOUD_PROVIDERS)[number]> = {
+    google: "google",
+    gemini: "google",
+    openai: "openai",
+    anthropic: "anthropic",
+  };
+  const relevantCloudProviders = useMemo(() => {
+    const set = new Set<(typeof CLOUD_PROVIDERS)[number]>();
+    const chatKey = chatProvider ? providerToKeyProvider[chatProvider.toLowerCase()] : undefined;
+    const embedKey = embeddingProvider ? providerToKeyProvider[embeddingProvider.toLowerCase()] : undefined;
+    if (chatKey) set.add(chatKey);
+    if (embedKey) set.add(embedKey);
+    return Array.from(set);
+  }, [chatProvider, embeddingProvider]);
+
+  useEffect(() => {
+    if (!chatModel || filteredChatOptions.length === 0) return;
+    const exists = filteredChatOptions.some((opt) => opt.value === chatModel);
+    if (!exists) {
+      setChatModel("");
+    }
+  }, [chatModel, filteredChatOptions]);
+
+  useEffect(() => {
+    if (!embeddingModel || filteredEmbeddingOptions.length === 0) return;
+    const exists = filteredEmbeddingOptions.some(
+      (opt) => opt.value === embeddingModel,
+    );
+    if (!exists) {
+      setEmbeddingModel("");
+    }
+  }, [embeddingModel, filteredEmbeddingOptions]);
 
   const handleRemoveMember = useCallback(
     async (membershipId: string) => {
@@ -181,8 +421,10 @@ export default function OrgSettingsPage() {
     <Container size="xl">
       <Stack gap="lg">
         <h1>{t("title")}</h1>
-        {(orgError || membersError) && (
-          <p style={{ color: "var(--color-error)" }}>{orgError ?? membersError}</p>
+        {(orgError || membersError || modelError || providerSecretsError) && (
+          <p style={{ color: "var(--color-error)" }}>
+            {orgError ?? membersError ?? modelError ?? providerSecretsError}
+          </p>
         )}
 
         <Card>
@@ -211,6 +453,233 @@ export default function OrgSettingsPage() {
                 {t("created")} {new Date(org.created_at).toLocaleDateString()}
               </p>
             )}
+          </Stack>
+        </Card>
+
+        <Card>
+          <Stack gap="md">
+            <h2 style={{ margin: 0, fontSize: "1.1rem" }}>
+              {t("modelsSectionTitle")}
+            </h2>
+            {modelLoading && <p>{t("loading")}</p>}
+            {modelConfig && (
+              <Stack gap="md">
+                <div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ flex: "0 0 200px", minWidth: 160 }}>
+                      <label style={{ display: "block", marginBottom: 4 }}>
+                        {t("chatProvider")}
+                      </label>
+                      <Select
+                        style={{ width: "100%" }}
+                        value={chatProviderFilter}
+                        disabled={!canManage}
+                        onChange={(value: string | "all") => setChatProviderFilter(value)}
+                        options={chatProviderFilterOptions}
+                      />
+                    </div>
+                    <div style={{ flex: "1 1 auto", minWidth: 200 }}>
+                      <label style={{ display: "block", marginBottom: 4 }}>
+                        {t("chatModel")}
+                      </label>
+                      <Select
+                        showSearch
+                        style={{ width: "100%" }}
+                        value={chatModel || undefined}
+                        disabled={!canManage}
+                        placeholder={t("chatModelPlaceholder")}
+                        onChange={(value) => {
+                          setChatModel(value);
+                          const matched = availableChatModels.find(
+                            (m) => m.name === value,
+                          );
+                          if (matched) {
+                            setChatProvider(matched.provider);
+                          }
+                        }}
+                        options={filteredChatOptions}
+                        optionFilterProp="label"
+                        allowClear
+                      />
+                    </div>
+                  </div>
+                  <p style={{ marginTop: 8, fontSize: 14, color: "var(--color-text-muted)" }}>
+                    {t("chatModelHelp")}
+                  </p>
+                </div>
+                <div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <div style={{ flex: "0 0 200px", minWidth: 160 }}>
+                      <label style={{ display: "block", marginBottom: 4 }}>
+                        {t("embeddingProvider")}
+                      </label>
+                      <Select
+                        style={{ width: "100%" }}
+                        value={embeddingProviderFilter}
+                        disabled={!canManage}
+                        onChange={(value: string | "all") =>
+                          setEmbeddingProviderFilter(value)
+                        }
+                        options={embeddingProviderFilterOptions}
+                      />
+                    </div>
+                    <div style={{ flex: "1 1 auto", minWidth: 200 }}>
+                      <label style={{ display: "block", marginBottom: 4 }}>
+                        {t("embeddingModel")}
+                      </label>
+                      <Select
+                        showSearch
+                        style={{ width: "100%" }}
+                        value={embeddingModel || undefined}
+                        disabled={!canManage}
+                        placeholder={t("embeddingModelPlaceholder")}
+                        onChange={(value) => {
+                          setEmbeddingModel(value);
+                          const matched = availableEmbeddingModels.find(
+                            (m) => m.name === value,
+                          );
+                          if (matched) {
+                            setEmbeddingProvider(matched.provider);
+                          }
+                        }}
+                        options={filteredEmbeddingOptions}
+                        optionFilterProp="label"
+                      />
+                    </div>
+                  </div>
+                  {filteredEmbeddingOptions.length === 0 && (
+                    <p style={{ marginTop: 8, fontSize: 14, color: "var(--color-text-muted)" }}>
+                      {t("noModelsForMode")}
+                    </p>
+                  )}
+                  <p style={{ marginTop: 8, fontSize: 14, color: "var(--color-text-muted)" }}>
+                    {t("embeddingModelHelp")}
+                  </p>
+                </div>
+                <div style={{ fontSize: 14, color: "var(--color-text-muted)" }}>
+                  <p style={{ margin: 0 }}>
+                    {t("embeddingVersion", {
+                      version: modelConfig.currentEmbeddingVersion,
+                    })}
+                  </p>
+                  {modelConfig.previousEmbeddingVersion !== null && (
+                    <p style={{ margin: 0 }}>
+                      {t("embeddingPreviousVersion", {
+                        version: modelConfig.previousEmbeddingVersion,
+                      })}
+                    </p>
+                  )}
+                </div>
+                {canManage && (
+                  <Button
+                    type="primary"
+                    loading={savingModelConfig}
+                    onClick={() => void handleSaveModelConfig()}
+                  >
+                    {t("saveModelConfig")}
+                  </Button>
+                )}
+              </Stack>
+            )}
+          </Stack>
+        </Card>
+
+        <Card>
+          <Stack gap="md">
+            <h2 style={{ margin: 0, fontSize: "1.1rem" }}>
+              {t("cloudKeysSectionTitle")}
+            </h2>
+            {providerSecretsLoading && <p>{t("loading")}</p>}
+            <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-muted)" }}>
+              {t("cloudKeysHelp")}
+            </p>
+            {relevantCloudProviders.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-muted)" }}>
+                {t("cloudKeysSelectModelFirst")}
+              </p>
+            ) : providerSecrets ? (
+              <Stack gap="md">
+                {relevantCloudProviders.map((provider) => {
+                  const secret = providerSecrets.find((s) => s.provider === provider) ?? null;
+                  const hasKey = secret?.hasKey ?? false;
+                  const last4 = secret?.last4 ?? null;
+                  const labelKey =
+                    provider === "openai"
+                      ? "openaiLabel"
+                      : provider === "anthropic"
+                      ? "anthropicLabel"
+                      : "googleLabel";
+                  const inputValue =
+                    provider === "openai"
+                      ? openaiKeyInput
+                      : provider === "anthropic"
+                      ? anthropicKeyInput
+                      : googleKeyInput;
+                  const isEditing = editingProvider === provider || !hasKey;
+
+                  return (
+                    <div key={provider}>
+                      <label style={{ display: "block", marginBottom: 4 }}>
+                        {t(labelKey)}
+                      </label>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        <div style={{ flex: "1 1 260px", minWidth: 220 }}>
+                          {isEditing ? (
+                            <Input.Password
+                              value={inputValue}
+                              disabled={!canManage}
+                              placeholder={t("apiKeyPlaceholder")}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (provider === "openai") setOpenaiKeyInput(value);
+                                if (provider === "anthropic") setAnthropicKeyInput(value);
+                                if (provider === "google") setGoogleKeyInput(value);
+                              }}
+                            />
+                          ) : (
+                            <Input.Password
+                              value="********"
+                              disabled
+                            />
+                          )}
+                        </div>
+                        {isEditing ? (
+                          <Button
+                            type="primary"
+                            onClick={() => void handleSaveProviderKey(provider, inputValue)}
+                            disabled={!canManage || !inputValue.trim()}
+                            loading={savingProvider === provider}
+                          >
+                            {t("saveApiKey")}
+                          </Button>
+                        ) : (
+                          canManage && (
+                            <Button
+                              type="default"
+                              onClick={() => {
+                                setEditingProvider(provider);
+                                if (provider === "openai") setOpenaiKeyInput("");
+                                if (provider === "anthropic") setAnthropicKeyInput("");
+                                if (provider === "google") setGoogleKeyInput("");
+                              }}
+                            >
+                              {t("overwriteApiKey")}
+                            </Button>
+                          )
+                        )}
+                      </div>
+                      <p style={{ marginTop: 4, fontSize: 14, color: "var(--color-text-muted)" }}>
+                        {hasKey
+                          ? last4
+                            ? t("apiKeyConfiguredMasked", { last4 })
+                            : t("apiKeyConfigured")
+                          : t("apiKeyNotConfigured")}
+                      </p>
+                    </div>
+                  );
+                })}
+              </Stack>
+            ) : null}
           </Stack>
         </Card>
 

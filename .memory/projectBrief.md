@@ -57,11 +57,24 @@ The long‑term goal is that a user can upload files, define reusable skills, co
     - `qwen2.5-coder:3b` (code‑oriented tasks, if/when needed).
   - Provide a **single abstraction** for model calls so that:
     - Switching to cloud models later (e.g. hosted LLM APIs) does not require rewriting agents/skills.
+  - Each **organization** can choose its preferred chat provider/model (local or cloud) via org-level configuration stored in `org_model_configs`.
 
 - **RAG & storage**
   - **Supabase** with pgvector (or Supabase vector) for storing embeddings per knowledge space.
   - Files stored in Supabase Storage (or equivalent), linked to one or more knowledge spaces.
   - RAG tools query embeddings filtered by `knowledge_space_id` (and, where needed, `project_id` / `agent_id`).
+  - Embeddings are **versioned per organization**:
+    - `document_chunks` store an `embedding_version` and `embedding_model`.
+    - At most **two versions** are kept per org (current + previous) to support soft migrations.
+    - RAG retrieval always uses the org’s active embedding version; previous versions are only kept temporarily during reindexing.
+  - An `embedding_models` registry table tracks supported models:
+    - Columns include provider (e.g. `ollama`, `supabase`, `openai`), name, kind (`embedding` or `chat`), dimension, and locality (`is_local`).
+    - Org-level model config chooses from this registry; free-text model names are not exposed in the UI.
+  - Current local models registered for development:
+    - `nomic-embed-text:latest` – local embedding model (Ollama, 768D).
+    - `mxbai-embed-large:latest` – local embedding model (Ollama, 1024D).
+    - `deepseek-r1:8b` – local chat model (Ollama).
+    - `phi4-mini:latest` – local chat model (Ollama).
 
 - **Frontend / shell**
   - **Next.js App Router**, TypeScript, React.

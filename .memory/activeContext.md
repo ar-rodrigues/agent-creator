@@ -2,7 +2,7 @@
 
 ### Current Task
 
-Design and align the **organizations, memberships, roles, and seats** model, and update the Memory Bank to describe orgs/seats/permissions and Phase 1 core work.
+**Phase 1 follow‑ups:** Implement the first end‑to‑end **document chunking and embeddings pipeline** for uploaded documents; extend RAG retrieval to full similarity search over embeddings (org + knowledge spaces + version-aware). Add a minimal **documents/knowledge space detail** view for indexing status. Org‑level model configuration, model registry, provider secrets, and General QA on the Knowledge page are already in place.
 
 ### Focus / Notes
 
@@ -13,7 +13,8 @@ Design and align the **organizations, memberships, roles, and seats** model, and
     - **Knowledge spaces** (general, project, agent) that drive RAG.
   - Mentions the use of **RAG**, **CrewAI**, **Ollama** (phi4‑mini, qwen2.5‑coder:3b), and **Supabase vector** at a conceptual level.
   - Acknowledges existing Next.js/i18n/auth/theming shell as the UI host rather than the core of the product itself.
-- The orgs/seats and **Phase 1 core** planning details are captured in `orgs-seats-and-phase1-core_*.plan.md`; as implementation proceeds, this Memory Bank should be kept aligned with that plan.
+  - Captures that each **organization** has its own model/embedding configuration (`org_model_configs`) backed by an `embedding_models` registry, and that RAG queries always route through this configuration and the org’s current embedding version.
+- The orgs/seats and **Phase 1 core** planning details are captured in `orgs-seats-and-phase1-core_*.plan.md`; the initial schema and API work for organizations and knowledge spaces has been implemented. **Database (Supabase):** `organizations`, `org_memberships`, `roles`, `org_model_configs`, `embedding_models`, `org_provider_secrets`, `knowledge_spaces`, `documents`, `document_chunks` (with `embedding_version`, `embedding_model`), `agents`, `skills`, `agent_skills`, `agent_knowledge_spaces`, plus permissions/seats tables. Local migrations under `supabase/migrations/` include 20260312_* for org_model_configs, embedding_models, document_chunks versioning, and org_provider_secrets.
 - Future tasks should:
   - Update `progressState.md` when major features are implemented (knowledge spaces, skills registry, agent creator, crews, orgs/seats).
   - Update this `activeContext.md` whenever the main focus shifts to a new feature area.
@@ -23,7 +24,7 @@ Design and align the **organizations, memberships, roles, and seats** model, and
 
 ### Current Task
 
-Align the project Memory Bank (`.memory/` folder) with the orgs/seats/permissions design and Phase 1 core roadmap so that future work can reliably use and update:
+Align the project Memory Bank (`.memory/` folder) with the **knowledge & storage Phase 1 focus** (chunking, embeddings, org‑level model config, and versioned RAG retrieval) so that future work can reliably use and update:
 
 - `projectBrief.md`
 - `productContext.md`
@@ -40,7 +41,7 @@ The goal is to have accurate, living documentation of project goals, product beh
   - Defining concrete “agent” and “skill” features.
   - Populating upcoming work items in `progressState.md`.
 - Future tasks should:
-  - Update `progressState.md` when major features or flows are added/changed.
-  - Update this `activeContext.md` when switching focus to a new task or area.
+  - Update `progressState.md` when major features or flows are added/changed (knowledge pipeline, skills registry, agent/crew features).
+  - Update this `activeContext.md` when switching focus to a new task or area (e.g. skills layer, agents & crews, org management UI).
   - Adjust `projectBrief.md` or `productContext.md` only when goals, constraints, or product behavior materially change.
 

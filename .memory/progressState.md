@@ -1,5 +1,7 @@
 ## Progress State – Agent & Skill Creator
 
+**Last updated:** 2025-03-12 — Memory synced with uncommitted changes: RAG General QA on Knowledge page, org provider secrets UI, extended RAG retrieval; git history: layout/i18n refactor, .gitignore updates, config/deps, initial commit.
+
 ### Current State
 
 The project has:
@@ -44,32 +46,51 @@ The project has:
     - File upload flow that stores documents in the `documents` bucket and links them to knowledge spaces.
   - Added an org‑scoped RAG retrieval stub in `lib/rag/retrieve.ts` that fetches chunks from `document_chunks` filtered by `org_id` and knowledge spaces.
 
+- **Org-level model configuration & soft RAG migration**
+  - Added an `org_model_configs` table and `lib/llm/orgConfig.ts` helper to store per‑org chat and embedding settings plus embedding versions.
+  - Extended `document_chunks` with `embedding_version` and `embedding_model` metadata and added indexes to support per‑version retrieval.
+  - Updated RAG helpers and `/api/rag/general` to:
+    - Resolve the org’s chat provider/model and embedding version from `org_model_configs`.
+    - Always query embeddings using the org’s active version.
+  - Added an `embedding_models` registry table that records provider, model name, kind (chat vs embedding), vector dimension, and whether a model is local or cloud, seeded with current local Ollama models (`nomic-embed-text:latest`, `mxbai-embed-large:latest`, `deepseek-r1:8b`, `phi4-mini:latest`).
+  - Introduced backend helpers to:
+    - Discover installed Ollama models at runtime.
+    - Expose available chat and embedding models via an org-scoped `/api/orgs/[orgId]/models` endpoint, filtering out disabled or missing local models.
+  - Refined the Org settings UI “Models & embeddings” section to:
+    - Use dropdown selectors populated from the backend model registry instead of free-text inputs.
+    - Provide a configuration mode toggle (local / cloud / mixed) that filters available options.
+    - Explain the difference between chat models (answer generation) and embedding models (indexing/search with fixed dimensions).
+  - **RAG general QA UI and provider secrets**
+    - Added **General QA** card on the Knowledge page (`/dashboard/knowledge`): users can ask a question, optionally select general knowledge spaces, choose provider (local / gemini / claude), and see answer + sources; powered by `useRagGeneral` and `/api/rag/general`.
+    - Extended RAG retrieval (`lib/rag/retrieve.ts`) with version-aware chunk fetching and optional similarity/score handling.
+    - Added **Org provider secrets** for external LLM APIs: `org_provider_secrets` table (encrypted API keys, `api_key_last4` for display), `useOrgProviderSecrets` hook, and Org settings UI to manage provider API keys (e.g. for Gemini, Claude).
+    - Document upload route and RAG flow updated as needed for current schema.
+
 ### Next
 
 > These are high‑level next steps; refine them into concrete tickets as you go.
 
-- **Phase 1 – Knowledge & storage (follow‑ups)**
+- **Phase 1 – Knowledge & storage (in progress)**
   - Implement the **chunking and embeddings pipeline** for `document_chunks` using the chosen embedding provider.
-  - Extend the RAG retrieval stub into a full similarity search over embeddings (top‑k per query).
-  - Add basic document listing and per‑space views in the UI (beyond upload + space listing).
+  - Extend the RAG retrieval stub into a full similarity search over embeddings (top‑k per query) scoped by org and knowledge spaces and aware of embedding versions.
+  - Add richer document listing and per‑space detail views in the UI (status, last indexed, file types, chunk counts, embedding version/migration status).
 
 - **Phase 2 – Skills layer**
-  - Implement a **skills registry** (DB + API) for defining skills as programmatic tools.
-  - Add an LLM abstraction for Ollama models with a stable interface.
+  - Implement a **skills registry** (DB + API) for defining skills as programmatic tools with metadata (name, description, allowed knowledge scopes).
+  - Add an LLM abstraction for Ollama models with a stable interface for both chat and tool‑calling flows.
   - Wire up programmatic tool calling for skills (and/or a prompt‑based protocol as a fallback).
-  - Build initial **Skills UI** in the dashboard to create/edit skills.
+  - Build initial **Skills UI** in the dashboard to create/edit skills and inspect basic run logs.
 
 - **Phase 3 – Agents & crews**
-  - Implement **agent configuration** (instructions, model, chosen skills, attached knowledge spaces).
+  - Implement **agent configuration** (instructions, default model, chosen skills, attached knowledge spaces).
   - Implement a single‑agent run end‑to‑end from the UI using RAG over the agent’s knowledge space union.
-  - Introduce **crews** (multi‑agent runs) via CrewAI for scenarios that benefit from parallelism.
-  - Build **Agent Creator UI** to manage agents and trigger runs.
+  - Introduce **crews** (multi‑agent runs) via CrewAI for scenarios that benefit from parallelism (e.g. analyst + checker).
+  - Build **Agent Creator UI** to manage agents, crews, and run history.
 
-- **Phase 4 – Orgs, seats & permissions**
-  - Design and implement **organizations**, **memberships**, **roles**, and **seat usage** as the foundation for multi-tenant usage.
-  - Wire `org_id` ownership into agents, skills, knowledge spaces, files, and runs.
-  - Enforce role-based permissions for creating/editing/running agents and managing knowledge.
-  - Prepare for future per-seat billing without implementing billing in this phase.
+- **Phase 4 – Orgs, seats & permissions (follow‑ups)**
+  - Add organization management screens (view org details, list members and roles, show seat usage).
+  - Enforce role‑based permissions for creating/editing/running agents and managing knowledge in the UI.
+  - Keep the data model compatible with future per‑seat billing without implementing billing in this phase.
 
 ### Pending / Follow-up (Supabase JWT signing)
 
@@ -81,9 +102,9 @@ The project has:
 
 ### Immediately next (concrete actions)
 
-- Design and document the **organizations / memberships / seats** schema.
-- Decide how to pick the **current organization** in the UI (simple selector in dashboard vs. URL-based).
-- Sketch the first **organization management screen** (view org details, list members and roles).
+- Implement the first end‑to‑end **chunking + embeddings** pipeline for uploaded documents and store embeddings in `document_chunks`.
+- Extend the existing RAG retrieval stub to perform similarity search over embeddings, filtered by org and selected knowledge spaces.
+- Add a minimal **documents/knowledge space detail** view in the dashboard to surface indexing status and basic metadata.
 
 ## Progress State – Agent Creator
 

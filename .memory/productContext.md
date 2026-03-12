@@ -192,6 +192,16 @@ These behaviors are already implemented and reused by the future agent/skill/kno
   - It should always be clear **which knowledge spaces** an agent used for a run.
   - Users should be able to understand why an answer might be missing information (e.g. project space not attached).
 
+- **Model configuration per organization**
+  - The **Org settings** screen lets admins pick:
+    - A chat provider/model (local vs cloud) for answering, chosen from a backend registry (no free text).
+    - An embedding provider/model for indexing and retrieval, also chosen from the registry and constrained to compatible dimensions.
+  - The backend maintains an `embedding_models` table that records, per model:
+    - Provider (`ollama`, `supabase`, `openai`, etc.), name, kind (chat vs embedding), vector dimension, and whether it is local or cloud.
+    - The Org Settings UI calls an API that combines this registry with runtime Ollama discovery so only installed, enabled local models appear in selectors.
+  - Changes to embedding configuration trigger a background **reindex** for that organization’s documents.
+  - During reindexing, RAG continues to use the **previous embedding version** so users can keep working; once reindex completes, the org switches to the new version and the oldest version is discarded (keeping at most two).
+
 - **Auditability (future)**
   - For more advanced users, we may expose:
     - Which chunks were retrieved via RAG.

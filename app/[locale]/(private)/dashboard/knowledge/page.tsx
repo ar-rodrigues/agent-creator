@@ -7,6 +7,7 @@ import type { UploadFile } from "antd";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useKnowledgeSpaces } from "@/hooks/useKnowledgeSpaces";
+import { useRagGeneral } from "@/hooks/useRagGeneral";
 import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/layout/Container";
 import { Stack } from "@/components/layout/Stack";
@@ -17,6 +18,12 @@ export default function KnowledgePage() {
   const { currentOrgId, currentOrganization } = useCurrentOrganization();
   const { can } = usePermissions(currentOrgId);
   const { data: spaces, loading, error, refetch } = useKnowledgeSpaces(currentOrgId);
+  const {
+    data: ragResult,
+    loading: ragLoading,
+    error: ragError,
+    ask: askRag,
+  } = useRagGeneral();
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createScope, setCreateScope] = useState<"general" | "project" | "agent">("general");
@@ -25,10 +32,15 @@ export default function KnowledgePage() {
   const [uploadFileList, setUploadFileList] = useState<UploadFile[]>([]);
   const [uploadSpaces, setUploadSpaces] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [question, setQuestion] = useState("");
+  const [qaSpaces, setQaSpaces] = useState<string[]>([]);
+  const [provider, setProvider] = useState<"local" | "gemini" | "claude">("local");
 
   const canCreate = can("KNOWLEDGE_SPACE_CREATE");
   const canUpload = can("DOCUMENT_UPLOAD");
   const canRead = can("KNOWLEDGE_SPACE_READ");
+
+  const generalSpaces = (spaces ?? []).filter((s) => s.scope === "general");
 
   const handleCreate = useCallback(async () => {
     if (!currentOrgId || !createName.trim()) return;
@@ -89,6 +101,21 @@ export default function KnowledgePage() {
     }
   }, [currentOrgId, uploadFileList, uploadSpaces, message, t]);
 
+  const handleAsk = useCallback(async () => {
+    if (!currentOrgId || !question.trim()) return;
+
+    try {
+      await askRag({
+        orgId: currentOrgId,
+        question: question.trim(),
+        knowledgeSpaceIds: qaSpaces,
+        provider,
+      });
+    } catch {
+      // error is handled inside the hook
+    }
+  }, [askRag, currentOrgId, provider, qaSpaces, question]);
+
   if (!currentOrganization) {
     return (
       <Container size="xl">
@@ -136,6 +163,93 @@ export default function KnowledgePage() {
             )}
           </Stack>
         </Card>
+        {canRead && (
+          <Card>
+            <Stack gap="md">
+              <h2>{t("generalQaTitle")}</h2>
+              {ragError && (
+                <p style={{ color: "var(--color-error)" }}>{ragError}</p>
+              )}
+              <div>
+                <label style={{ display: "block", marginBottom: 4 }}>{t("questionLabel")}</label>
+                <textarea
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  placeholder={t("questionPlaceholder")}
+                  style={{ width: "100%", minHeight: 80, padding: 8 }}
+                />
+              </div>
+              {generalSpaces.length > 0 && (
+                <div>
+                  <label style={{ display: "block", marginBottom: 4 }}>
+                    {t("generalQaSpacesOptional")}
+                  </label>
+                  <select
+                    multiple
+                    value={qaSpaces}
+                    onChange={(e) => {
+                      const opts = Array.from(
+                        (e.target as HTMLSelectElement).selectedOptions,
+                        (o) => o.value,
+                      );
+                      setQaSpaces(opts);
+                    }}
+                    style={{ width: "100%", minHeight: 80 }}
+                  >
+                    {generalSpaces.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label style={{ display: "block", marginBottom: 4 }}>{t("providerLabel")}</label>
+                <select
+                  value={provider}
+                  onChange={(e) =>
+                    setProvider(e.target.value as "local" | "gemini" | "claude")
+                  }
+                  style={{ width: "100%", padding: 8 }}
+                >
+                  <option value="local">{t("providerLocal")}</option>
+                  <option value="gemini">{t("providerGemini")}</option>
+                  <option value="claude">{t("providerClaude")}</option>
+                </select>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <Button
+                  type="primary"
+                  onClick={() => void handleAsk()}
+                  loading={ragLoading}
+                  disabled={!question.trim()}
+                >
+                  {t("askButton")}
+                </Button>
+              </div>
+              {ragResult && (
+                <div>
+                  <h3>{t("answerTitle")}</h3>
+                  <p style={{ whiteSpace: "pre-wrap" }}>{ragResult.answer}</p>
+                  {ragResult.sources.length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <strong>{t("sourcesTitle")}</strong>
+                      <ul>
+                        {ragResult.sources.map((s) => (
+                          <li key={`${s.documentId}-${s.spaceId}-${s.chunkIndex}`}>
+                            {s.documentId} – {s.spaceId}
+                            {typeof s.score === "number" ? ` (${s.score.toFixed(3)})` : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Stack>
+          </Card>
+        )}
       </Stack>
 
       <Modal
