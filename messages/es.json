@@ -80,7 +80,8 @@
     "overviewGenerating": "Generando resumen…",
     "overviewTitle": "Resumen del conocimiento",
     "typeQuestion": "Escribe una pregunta…",
-    "send": "Enviar"
+    "send": "Enviar",
+    "stop": "Detener"
   },
   "home": {
     "title": "Bienvenido",

@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/permissions";
 import { getLlmClient } from "@/lib/llm/client";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
-import type { LlmMessage } from "@/lib/llm/types";
+import type { LlmMessage, LlmProvider } from "@/lib/llm/types";
 
 type RouteParams = { params: Promise<{ spaceId: string }> };
 
@@ -68,7 +68,7 @@ export async function POST(request: Request, { params }: RouteParams) {
     .join("\n\n");
 
   const orgConfig = await getOrgModelConfig(space.org_id);
-  const client = getLlmClient(orgConfig.chatProvider ?? undefined);
+  const client = getLlmClient((orgConfig.chatProvider as LlmProvider) ?? undefined);
 
   const messages: LlmMessage[] = [
     {

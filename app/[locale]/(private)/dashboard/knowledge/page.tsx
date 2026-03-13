@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { App, Button, Modal, Popconfirm } from "antd";
-import { PlusOutlined, SendOutlined } from "@ant-design/icons";
+import { PlusOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useKnowledgeSpaces } from "@/hooks/useKnowledgeSpaces";
@@ -39,10 +39,11 @@ export default function KnowledgePage() {
     error: docsError,
     refetch: refetchDocs,
   } = useGeneralDocuments(currentOrgId);
-  const { loading: ragLoading, ask: askRag } = useRagGeneral();
+  const { loading: ragLoading, askStreaming: askRagStreaming } = useRagGeneral();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -204,36 +205,68 @@ export default function KnowledgePage() {
     const userQuestion = question.trim();
     setQuestion("");
 
-    setMessages((prev) => [...prev, { role: "user", content: userQuestion }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userQuestion },
+      { role: "assistant", content: "" },
+    ]);
 
-    try {
-      const result = await askRag({
+    abortControllerRef.current = new AbortController();
+
+    await askRagStreaming(
+      {
         orgId: currentOrgId,
         question: userQuestion,
         knowledgeSpaceIds: [],
-      });
-      if (result) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: result.answer,
-            sources: result.sources,
-            documentNameMap,
-          },
-        ]);
-      }
-    } catch {
-      // handled inside hook; add error message to thread
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: "Something went wrong. Please try again.",
+      },
+      {
+        signal: abortControllerRef.current.signal,
+        onChunk: (text) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next.length - 1;
+            if (last >= 0 && next[last].role === "assistant") {
+              next[last] = { ...next[last], content: next[last].content + text };
+            }
+            return next;
+          });
         },
-      ]);
-    }
-  }, [askRag, currentOrgId, documentNameMap, question, ragLoading]);
+        onDone: ({ sources }) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next.length - 1;
+            if (last >= 0 && next[last].role === "assistant") {
+              const current = next[last];
+              next[last] = {
+                ...current,
+                content: current.content || "No answer generated.",
+                sources,
+                documentNameMap,
+              };
+            }
+            return next;
+          });
+        },
+        onError: (error) => {
+          setMessages((prev) => {
+            const next = [...prev];
+            const last = next.length - 1;
+            if (last >= 0 && next[last].role === "assistant") {
+              const current = next[last];
+              next[last] = {
+                ...current,
+                content:
+                  error === "Cancelled"
+                    ? current.content || "Stopped."
+                    : "Something went wrong. Please try again.",
+              };
+            }
+            return next;
+          });
+        },
+      },
+    );
+  }, [askRagStreaming, currentOrgId, documentNameMap, question, ragLoading]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -254,28 +287,48 @@ export default function KnowledgePage() {
   }
 
   return (
-    <Container size="xl">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        style={{ display: "none" }}
-        onChange={handleFileInputChange}
-      />
-
-      <div
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <Container
+        size="xl"
         style={{
+          flex: 1,
+          minHeight: 0,
+          overflow: "hidden",
           display: "flex",
-          gap: "var(--space-6)",
-          height: "calc(100vh - 120px)",
-          alignItems: "stretch",
+          flexDirection: "column",
         }}
       >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={handleFileInputChange}
+        />
+
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--space-6)",
+            flex: 1,
+            minHeight: 0,
+            overflow: "hidden",
+            alignItems: "stretch",
+          }}
+        >
         {/* Left sidebar */}
         <aside
           style={{
             width: SIDEBAR_WIDTH,
             flexShrink: 0,
+            minHeight: 0,
             display: "flex",
             flexDirection: "column",
           }}
@@ -447,6 +500,7 @@ export default function KnowledgePage() {
           style={{
             flex: 1,
             minWidth: 0,
+            minHeight: 0,
             display: "flex",
             flexDirection: "column",
           }}
@@ -545,80 +599,108 @@ export default function KnowledgePage() {
                   <ChatMessage key={i} entry={entry} />
                 ))}
 
-                {ragLoading && (
-                  <div
-                    style={{
-                      alignSelf: "flex-start",
-                      padding: "var(--space-3) var(--space-4)",
-                      borderRadius: "var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm)",
-                      background: "var(--color-surface-elevated)",
-                      border: "1px solid var(--color-border)",
-                      fontSize: "var(--text-sm)",
-                      color: "var(--color-text-muted)",
-                    }}
-                  >
-                    <span style={{ animation: "pulse 1.5s infinite" }}>…</span>
-                  </div>
-                )}
-
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Input area */}
+              {/* Input area: single message box with button inside */}
               <div
                 style={{
                   borderTop: "1px solid var(--color-border)",
                   padding: "var(--space-4)",
-                  display: "flex",
-                  gap: "var(--space-3)",
-                  alignItems: "flex-end",
                   background: "var(--color-surface)",
                 }}
               >
-                <textarea
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={t("typeQuestion")}
-                  rows={1}
+                <div
                   style={{
-                    flex: 1,
-                    resize: "none",
-                    padding: "var(--space-3)",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 0,
                     border: "1px solid var(--color-border)",
                     borderRadius: "var(--radius-lg)",
                     background: "var(--color-input-bg)",
-                    color: "var(--color-text)",
-                    fontSize: "var(--text-sm)",
-                    lineHeight: 1.6,
-                    outline: "none",
-                    maxHeight: 120,
-                    overflowY: "auto",
-                    fontFamily: "var(--font-sans)",
+                    paddingTop: "var(--space-2)",
+                    paddingBottom: "var(--space-2)",
+                    paddingLeft: "var(--space-3)",
+                    paddingRight: "var(--space-2)",
+                    minHeight: 44,
                   }}
-                  onInput={(e) => {
-                    const el = e.currentTarget;
-                    el.style.height = "auto";
-                    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
-                  }}
-                />
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={() => void handleAsk()}
-                  loading={ragLoading}
-                  disabled={!question.trim()}
-                  style={{ flexShrink: 0 }}
                 >
-                  {t("send")}
-                </Button>
+                  <textarea
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    placeholder={t("typeQuestion")}
+                    rows={1}
+                    style={{
+                      flex: 1,
+                      resize: "none",
+                      padding: "var(--space-1) 0",
+                      border: "none",
+                      borderRadius: 0,
+                      background: "transparent",
+                      color: "var(--color-text)",
+                      fontSize: "var(--text-sm)",
+                      lineHeight: 1.5,
+                      outline: "none",
+                      minHeight: 24,
+                      maxHeight: 120,
+                      overflowY: "auto",
+                      fontFamily: "var(--font-sans)",
+                      scrollbarWidth: "none",
+                    }}
+                    className="knowledge-chat-input"
+                    onInput={(e) => {
+                      const el = e.currentTarget;
+                      el.style.height = "auto";
+                      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+                    }}
+                  />
+                  {ragLoading ? (
+                    <Button
+                      icon={<StopOutlined />}
+                      onClick={() => abortControllerRef.current?.abort()}
+                      title={t("stop")}
+                      className="knowledge-chat-stop-btn"
+                      style={{
+                        flexShrink: 0,
+                        width: 40,
+                        height: 40,
+                        minWidth: 40,
+                        padding: 0,
+                        borderRadius: "var(--radius-full)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    />
+                  ) : (
+                    <Button
+                      type="primary"
+                      icon={<SendOutlined />}
+                      onClick={() => void handleAsk()}
+                      disabled={!question.trim()}
+                      title={t("send")}
+                      style={{
+                        flexShrink: 0,
+                        width: 40,
+                        height: 40,
+                        minWidth: 40,
+                        padding: 0,
+                        borderRadius: "var(--radius-full)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </Card>
           )}
         </main>
-      </div>
+        </div>
 
-      <Modal
+        <Modal
         title={t("createModalTitle")}
         open={createModalOpen}
         onOk={() => void handleCreate()}
@@ -649,6 +731,7 @@ export default function KnowledgePage() {
           </p>
         </Stack>
       </Modal>
-    </Container>
+      </Container>
+    </div>
   );
 }

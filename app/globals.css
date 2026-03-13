@@ -57,3 +57,15 @@ a {
   border-color: var(--color-primary) !important;
   box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2) !important;
 }
+
+/* Knowledge chat input: hide scrollbar */
+.knowledge-chat-input::-webkit-scrollbar {
+  display: none;
+}
+
+/* Stop button: keep icon visible (contrast on hover) */
+.knowledge-chat-stop-btn .anticon,
+.knowledge-chat-stop-btn:hover .anticon,
+.knowledge-chat-stop-btn:focus .anticon {
+  color: var(--color-text) !important;
+}

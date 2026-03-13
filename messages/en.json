@@ -80,7 +80,8 @@
     "overviewGenerating": "Generating overview…",
     "overviewTitle": "Knowledge overview",
     "typeQuestion": "Type a question…",
-    "send": "Send"
+    "send": "Send",
+    "stop": "Stop"
   },
   "home": {
     "title": "Welcome",

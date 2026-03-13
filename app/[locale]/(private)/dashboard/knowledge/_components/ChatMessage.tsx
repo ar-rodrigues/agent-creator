@@ -59,12 +59,17 @@ const USER_BUBBLE_STYLE: React.CSSProperties = {
 const ASSISTANT_BUBBLE_STYLE: React.CSSProperties = {
   alignSelf: "flex-start",
   maxWidth: "85%",
+  maxHeight: "60vh",
   padding: "var(--space-3) var(--space-4)",
   borderRadius: "var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm)",
   background: "var(--color-surface-elevated)",
   border: "1px solid var(--color-border)",
   fontSize: "var(--text-sm)",
   lineHeight: 1.7,
+  display: "flex",
+  flexDirection: "column",
+  minHeight: 0,
+  overflow: "hidden",
 };
 
 export function ChatMessage({ entry }: ChatMessageProps) {
@@ -78,51 +83,29 @@ export function ChatMessage({ entry }: ChatMessageProps) {
     );
   }
 
-  const nodes = sources.length > 0
-    ? renderWithCitations(content, sources, documentNameMap)
-    : [content];
+  const isEmpty = content === "";
+  const nodes =
+    sources.length > 0
+      ? renderWithCitations(content, sources, documentNameMap)
+      : [content];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <div style={ASSISTANT_BUBBLE_STYLE}>
-        <div style={{ whiteSpace: "pre-wrap" }}>{nodes}</div>
-
-        {sources.length > 0 && (
-          <div
-            style={{
-              marginTop: "var(--space-3)",
-              paddingTop: "var(--space-3)",
-              borderTop: "1px solid var(--color-border)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "var(--space-1)",
-            }}
-          >
-            {sources.map((s) => (
-              <div
-                key={`${s.documentId}-${s.chunkIndex}`}
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: "var(--space-2)",
-                  fontSize: "var(--text-xs)",
-                  color: "var(--color-text-muted)",
-                }}
-              >
-                <SourceBadge
-                  source={s}
-                  filename={documentNameMap[s.documentId]}
-                />
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {documentNameMap[s.documentId] ?? s.documentId}
-                  {typeof s.score === "number"
-                    ? ` · ${(s.score * 100).toFixed(1)}%`
-                    : ""}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
+        <div
+          style={{
+            whiteSpace: "pre-wrap",
+            overflowY: "auto",
+            minHeight: 0,
+            flex: "1 1 auto",
+          }}
+        >
+          {isEmpty ? (
+            <span style={{ color: "var(--color-text-muted)" }}>Thinking…</span>
+          ) : (
+            nodes
+          )}
+        </div>
       </div>
     </div>
   );

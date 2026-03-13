@@ -37,5 +37,10 @@ export type LlmChatResponse = {
 
 export interface ILlmClient {
   chat(request: LlmChatRequest): Promise<LlmChatResponse>;
+  /**
+   * Stream chat completion tokens. Yields text chunks as they arrive.
+   * Caller can collect chunks to form the full assistant message.
+   */
+  chatStream(request: LlmChatRequest): AsyncGenerator<string, void, unknown>;
 }
 
