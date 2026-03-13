@@ -3,14 +3,18 @@
 import { useCallback, useState } from "react";
 import type { LlmProvider } from "@/lib/llm/types";
 
+export type RagSource = {
+  number: number;
+  documentId: string;
+  spaceId: string;
+  chunkIndex: number;
+  score: number | null;
+  content: string;
+};
+
 export type RagGeneralAnswer = {
   answer: string;
-  sources: {
-    documentId: string;
-    spaceId: string;
-    chunkIndex: number;
-    score: number | null;
-  }[];
+  sources: RagSource[];
   meta: {
     provider: LlmProvider | null;
     model?: string;
@@ -18,16 +22,18 @@ export type RagGeneralAnswer = {
   };
 };
 
+type AskParams = {
+  orgId: string;
+  question: string;
+  knowledgeSpaceIds?: string[];
+  provider?: LlmProvider;
+};
+
 export type UseRagGeneralReturn = {
   data: RagGeneralAnswer | null;
   loading: boolean;
   error: string | null;
-  ask: (params: {
-    orgId: string;
-    question: string;
-    knowledgeSpaceIds?: string[];
-    provider?: LlmProvider;
-  }) => Promise<void>;
+  ask: (params: AskParams) => Promise<RagGeneralAnswer | null>;
 };
 
 export function useRagGeneral(): UseRagGeneralReturn {
@@ -35,7 +41,7 @@ export function useRagGeneral(): UseRagGeneralReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const ask = useCallback<UseRagGeneralReturn["ask"]>(async (params) => {
+  const ask = useCallback(async (params: AskParams): Promise<RagGeneralAnswer | null> => {
     setLoading(true);
     setError(null);
     setData(null);
@@ -61,9 +67,11 @@ export function useRagGeneral(): UseRagGeneralReturn {
       }
 
       setData(payload);
+      return payload;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setData(null);
+      return null;
     } finally {
       setLoading(false);
     }

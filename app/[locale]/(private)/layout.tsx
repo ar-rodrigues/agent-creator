@@ -4,6 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { PrivateHeader } from "@/components/PrivateHeader";
 import { Footer } from "@/components/Footer";
 import { OrgSelector } from "@/components/org/OrgSelector";
+import { ReindexProvider } from "@/contexts/ReindexContext";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
 import styles from "./layout.module.css";
@@ -33,32 +34,34 @@ export default async function PrivateLayout({ children, params }: Props) {
   const t = await getTranslations("common");
 
   return (
-    <div className={styles.wrapper}>
-      <PrivateHeader />
-      <div className={styles.body}>
-        <aside className={styles.sidebar}>
-          <nav className={styles.nav}>
-            <Link href="/dashboard" className={styles.navLink}>
-              {t("dashboard")}
-            </Link>
-            {hasOrgs ? (
-              <>
-                <Link href="/dashboard/knowledge" className={styles.navLink}>
-                  {t("knowledge")}
-                </Link>
-                <Link href="/org/settings" className={styles.navLink}>
-                  {t("orgSettings")}
-                </Link>
-              </>
-            ) : null}
-          </nav>
-          <div className={styles.sidebarFooter}>
-            <OrgSelector />
-          </div>
-        </aside>
-        <main className={styles.main}>{children}</main>
+    <ReindexProvider>
+      <div className={styles.wrapper}>
+        <PrivateHeader />
+        <div className={styles.body}>
+          <aside className={styles.sidebar}>
+            <nav className={styles.nav}>
+              <Link href="/dashboard" className={styles.navLink}>
+                {t("dashboard")}
+              </Link>
+              {hasOrgs ? (
+                <>
+                  <Link href="/dashboard/knowledge" className={styles.navLink}>
+                    {t("knowledge")}
+                  </Link>
+                  <Link href="/org/settings" className={styles.navLink}>
+                    {t("orgSettings")}
+                  </Link>
+                </>
+              ) : null}
+            </nav>
+            <div className={styles.sidebarFooter}>
+              <OrgSelector />
+            </div>
+          </aside>
+          <main className={styles.main}>{children}</main>
+        </div>
+        <Footer />
       </div>
-      <Footer />
-    </div>
+    </ReindexProvider>
   );
 }

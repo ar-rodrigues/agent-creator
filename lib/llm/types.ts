@@ -5,7 +5,7 @@ export type LlmMessage = {
   content: string;
 };
 
-export type LlmProvider = "local" | "gemini" | "claude";
+export type LlmProvider = "local" | "ollama" | "gemini" | "claude";
 
 export type LlmChatRequest = {
   messages: LlmMessage[];

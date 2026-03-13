@@ -1,4 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getOrgModelConfig } from "@/lib/llm/orgConfig";
+import { extractText, getDocumentProxy } from "unpdf";
 
 export type Chunk = {
   index: number;
@@ -12,13 +14,27 @@ export type ChunkDocumentInput = {
   overlap?: number;
 };
 
+/**
+ * Sanitizes text so it can be safely sent as JSON (e.g. in Supabase insert).
+ * Replaces invalid \u escape sequences (e.g. \u0, \u00) that would cause
+ * "unsupported Unicode escape sequence" when the payload is parsed.
+ */
+function sanitizeForJsonPayload(text: string): string {
+  return text.replace(/\\u([0-9a-fA-F]{0,3})(?![0-9a-fA-F])/g, " ");
+}
+
+/** Removes null (U+0000) and other control chars that PostgreSQL text type rejects. */
+function stripNullsAndControlChars(text: string): string {
+  return text.replace(/\0/g, " ").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, " ");
+}
+
 export function chunkDocument(input: ChunkDocumentInput): Chunk[] {
   const { content, maxChars = 800, overlap = 200 } = input;
   if (!content.trim()) {
     return [];
   }
 
-  const normalized = content.replace(/\r\n/g, "\n");
+  const normalized = stripNullsAndControlChars(sanitizeForJsonPayload(content)).replace(/\r\n/g, "\n");
   const paragraphs = normalized.split(/\n{2,}/);
 
   const chunks: Chunk[] = [];
@@ -78,6 +94,9 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
 
   const supabase = await createSupabaseServerClient();
 
+  const orgConfig = await getOrgModelConfig(orgId);
+  const currentEmbeddingVersion = orgConfig.currentEmbeddingVersion;
+
   const { data: fileData, error: downloadError } = await supabase.storage
     .from("documents")
     .download(storagePath);
@@ -91,12 +110,31 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
   }
 
   const resolvedContentType = contentType || "application/octet-stream";
-  if (!resolvedContentType.startsWith("text/") && resolvedContentType !== "application/json") {
-    console.warn("Skipping chunking for non-text content type", resolvedContentType);
+
+  let text: string;
+  if (resolvedContentType === "application/pdf") {
+    try {
+      const buffer = await fileData.arrayBuffer();
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
+      const result = await extractText(pdf, { mergePages: true });
+      text = result.text ?? "";
+    } catch (err) {
+      console.warn(
+        "PDF text extraction failed",
+        err instanceof Error ? err.message : String(err),
+      );
+      return;
+    }
+  } else if (
+    resolvedContentType.startsWith("text/") ||
+    resolvedContentType === "application/json"
+  ) {
+    text = await fileData.text();
+  } else {
+    console.warn("Skipping chunking for unsupported content type", resolvedContentType);
     return;
   }
 
-  const text = await fileData.text();
   const chunks = chunkDocument({ content: text });
 
   if (!chunks.length) {
@@ -110,6 +148,7 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
       knowledge_space_id: knowledgeSpaceId,
       chunk_index: chunk.index,
       content: chunk.content,
+      embedding_version: currentEmbeddingVersion,
     })),
   );
 

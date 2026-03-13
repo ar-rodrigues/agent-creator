@@ -35,7 +35,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const canUpload = await hasPermission(orgId.trim(), user.id, "DOCUMENT_UPLOAD");
+  const canUpload = await hasPermission(
+    orgId.trim(),
+    user.id,
+    "DOCUMENT_UPLOAD",
+  );
   if (!canUpload) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
@@ -55,10 +59,17 @@ export async function POST(request: Request) {
     }
   }
 
+  if (knowledgeSpaceIds.length === 0) {
+    return NextResponse.json(
+      { error: "At least one knowledge space is required" },
+      { status: 400 },
+    );
+  }
+
   const crypto = await import("crypto");
   const fileId = crypto.randomUUID();
   const ext = file.name.replace(/^.*\./, "") || "bin";
-  const storagePath = `org/${orgId.trim()}/documents/${fileId}.${ext}`;
+  const storagePath = `org/${orgId.trim()}/spaces/${knowledgeSpaceIds[0]}/documents/${fileId}.${ext}`;
 
   const arrayBuffer = await file.arrayBuffer();
   const { error: uploadError } = await supabase.storage
@@ -110,26 +121,38 @@ export async function POST(request: Request) {
     }
   }
 
-  void indexDocumentTextForSpaces({
-    orgId: orgId.trim(),
-    documentId: doc.id,
-    storagePath: doc.storage_path,
-    contentType: file.type || null,
-    knowledgeSpaceIds,
-  })
-    .then(() =>
-      embedChunksForDocument({
-        orgId: orgId.trim(),
-        documentId: doc.id,
-        // Embedding version will be resolved by the Edge Function when omitted.
-      }),
-    )
-    .catch((err) => {
-      console.warn(
-        "Document indexing pipeline failed",
-        err instanceof Error ? err.message : err,
-      );
+  try {
+    await indexDocumentTextForSpaces({
+      orgId: orgId.trim(),
+      documentId: doc.id,
+      storagePath: doc.storage_path,
+      contentType: file.type || null,
+      knowledgeSpaceIds,
     });
+    await embedChunksForDocument({
+      orgId: orgId.trim(),
+      documentId: doc.id,
+    });
+  } catch (err) {
+    // Rollback: remove chunks, document record, and storage object
+    await supabase
+      .from("document_chunks")
+      .delete()
+      .eq("document_id", doc.id)
+      .eq("org_id", orgId.trim());
+    await supabase.from("documents").delete().eq("id", doc.id);
+    await supabase.storage.from(BUCKET).remove([storagePath]);
+
+    return NextResponse.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "Document indexing failed. File was not saved.",
+      },
+      { status: 500 },
+    );
+  }
 
   return NextResponse.json(
     {

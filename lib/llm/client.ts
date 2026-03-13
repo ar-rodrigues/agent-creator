@@ -20,6 +20,7 @@ export function getLlmClient(provider?: LlmProvider): ILlmClient {
 function createClient(provider: LlmProvider): ILlmClient {
   switch (provider) {
     case "local":
+    case "ollama":
       return new OllamaLlmClient();
     case "gemini":
       return new GeminiLlmClient();

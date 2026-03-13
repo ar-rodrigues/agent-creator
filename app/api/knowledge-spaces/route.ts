@@ -29,7 +29,7 @@ export async function GET(request: Request) {
 
   const { data, error } = await supabase
     .from("knowledge_spaces")
-    .select("id, name, scope, project_id, created_at")
+    .select("id, name, scope, project_id, created_at, summary_title, summary")
     .eq("org_id", orgId)
     .order("created_at", { ascending: false });
 

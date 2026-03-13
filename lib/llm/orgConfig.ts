@@ -7,6 +7,7 @@ export type OrgModelConfig = {
   embeddingModel: string;
   currentEmbeddingVersion: number;
   previousEmbeddingVersion: number | null;
+  reindexStatus: "idle" | "in_progress" | "error";
 };
 
 const DEFAULT_CHAT_PROVIDER = process.env.LLM_PROVIDER ?? "local";
@@ -27,7 +28,7 @@ export async function getOrgModelConfig(orgId: string): Promise<OrgModelConfig> 
   const { data, error } = await supabase
     .from("org_model_configs")
     .select(
-      "chat_provider, chat_model, embedding_provider, embedding_model, current_embedding_version, previous_embedding_version",
+      "chat_provider, chat_model, embedding_provider, embedding_model, current_embedding_version, previous_embedding_version, reindex_status",
     )
     .eq("org_id", orgId)
     .maybeSingle();
@@ -47,6 +48,7 @@ export async function getOrgModelConfig(orgId: string): Promise<OrgModelConfig> 
       embeddingModel: DEFAULT_EMBEDDING_MODEL,
       currentEmbeddingVersion: 1,
       previousEmbeddingVersion: null,
+      reindexStatus: "idle",
     };
   }
 
@@ -57,6 +59,7 @@ export async function getOrgModelConfig(orgId: string): Promise<OrgModelConfig> 
     embeddingModel: data.embedding_model || DEFAULT_EMBEDDING_MODEL,
     currentEmbeddingVersion: data.current_embedding_version ?? 1,
     previousEmbeddingVersion: data.previous_embedding_version ?? null,
+    reindexStatus: (data.reindex_status as "idle" | "in_progress" | "error") ?? "idle",
   };
 }
 

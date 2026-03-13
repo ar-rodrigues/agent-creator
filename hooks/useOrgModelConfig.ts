@@ -9,6 +9,7 @@ export type OrgModelConfig = {
   embeddingModel: string;
   currentEmbeddingVersion: number;
   previousEmbeddingVersion: number | null;
+  reindexStatus: "idle" | "in_progress" | "error";
 };
 
 export type UseOrgModelConfigReturn = {
@@ -53,6 +54,7 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
         embeddingModel: payload.config.embeddingModel,
         currentEmbeddingVersion: payload.config.currentEmbeddingVersion,
         previousEmbeddingVersion: payload.config.previousEmbeddingVersion,
+        reindexStatus: payload.config.reindexStatus ?? "idle",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -94,6 +96,7 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
         embeddingModel: body.config.embeddingModel,
         currentEmbeddingVersion: body.config.currentEmbeddingVersion,
         previousEmbeddingVersion: body.config.previousEmbeddingVersion,
+        reindexStatus: body.config.reindexStatus ?? "idle",
       });
     },
     [orgId],

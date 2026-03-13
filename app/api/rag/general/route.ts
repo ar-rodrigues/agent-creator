@@ -3,7 +3,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/permissions";
 import { getLlmClient } from "@/lib/llm/client";
 import type { LlmProvider, LlmMessage } from "@/lib/llm/types";
-import { buildRagContextFromChunks, retrieveRelevantChunks } from "@/lib/rag/retrieve";
+import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 
 type GeneralRagRequest = {
@@ -95,12 +95,17 @@ export async function POST(request: Request) {
     );
   }
 
-  const context = buildRagContextFromChunks(chunks);
+  const context = chunks
+    .map((chunk, i) => `[${i + 1}] ${chunk.content}`)
+    .join("\n\n");
 
   const systemPrompt = [
     "You are an assistant that answers questions using the provided organization knowledge.",
     "Use the context sections below to answer factually.",
     "If the answer is not contained in the context, say you do not know rather than inventing details.",
+    "Each context section is numbered starting at 1.",
+    "When you reference information from a source, insert the citation marker [N] (where N is the source number) immediately after the referenced information.",
+    "Example: 'The component has 10 pins [1], and supports voltages up to 1000V [2].'",
   ].join(" ");
 
   const messages: LlmMessage[] = [
@@ -127,11 +132,13 @@ export async function POST(request: Request) {
     });
     const answerMessage = response.messages[response.messages.length - 1];
 
-    const sources = chunks.map((chunk) => ({
+    const sources = chunks.map((chunk, i) => ({
+      number: i + 1,
       documentId: chunk.document_id,
       spaceId: chunk.knowledge_space_id,
       chunkIndex: chunk.chunk_index,
       score: typeof chunk.score === "number" ? chunk.score : null,
+      content: chunk.content,
     }));
 
     return NextResponse.json(

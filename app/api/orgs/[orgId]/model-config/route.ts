@@ -5,9 +5,6 @@ import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 
 type Params = { params: Promise<{ orgId: string }> };
 
-const REINDEX_FUNCTION =
-  process.env.SUPABASE_RAG_REINDEX_FUNCTION ?? "reindex_org_embeddings";
-
 export async function GET(_request: Request, { params }: Params) {
   const supabase = await createSupabaseServerClient();
   const {
@@ -38,6 +35,7 @@ export async function GET(_request: Request, { params }: Params) {
       embeddingModel: config.embeddingModel,
       currentEmbeddingVersion: config.currentEmbeddingVersion,
       previousEmbeddingVersion: config.previousEmbeddingVersion,
+      reindexStatus: config.reindexStatus,
       isDefault: false,
     },
   });
@@ -119,14 +117,43 @@ export async function PATCH(request: Request, { params }: Params) {
     );
   }
 
-  const { data: existing, error: loadErr } = await supabase
+  const { data: existingConfig, error: loadErr } = await supabase
     .from("org_model_configs")
-    .select("org_id")
+    .select("org_id, embedding_model, current_embedding_version, previous_embedding_version")
     .eq("org_id", orgId)
     .maybeSingle();
 
   if (loadErr) {
     return NextResponse.json({ error: loadErr.message }, { status: 500 });
+  }
+
+  const embeddingModelChanged =
+    existingConfig !== null && existingConfig.embedding_model !== embeddingModel;
+
+  // Version bump + cleanup when the embedding model changes.
+  let versionFields: Record<string, unknown> = {};
+  if (embeddingModelChanged) {
+    const currentVersion = (existingConfig.current_embedding_version as number) ?? 1;
+    const previousVersion = existingConfig.previous_embedding_version as number | null;
+
+    // Delete the oldest kept version to stay at most one version behind.
+    if (previousVersion !== null) {
+      const { error: deleteErr } = await supabase
+        .from("document_chunks")
+        .delete()
+        .eq("org_id", orgId)
+        .eq("embedding_version", previousVersion);
+
+      if (deleteErr) {
+        console.warn("model-config PATCH: failed to delete old chunks", deleteErr.message);
+      }
+    }
+
+    versionFields = {
+      previous_embedding_version: currentVersion,
+      current_embedding_version: currentVersion + 1,
+      reindex_status: "in_progress",
+    };
   }
 
   const upsertPayload = {
@@ -135,6 +162,7 @@ export async function PATCH(request: Request, { params }: Params) {
     chat_model: chatModel,
     embedding_provider: embeddingProvider,
     embedding_model: embeddingModel,
+    ...versionFields,
   };
 
   const { error: upsertErr } = await supabase
@@ -143,23 +171,6 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (upsertErr) {
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });
-  }
-
-  // Fire-and-forget reindex trigger when embedding settings change.
-  if (existing && embeddingModel) {
-    void supabase.functions
-      .invoke(REINDEX_FUNCTION, {
-        body: {
-          orgId,
-          reason: "embeddingModelChanged",
-        },
-      })
-      .catch((err) => {
-        console.warn(
-          "Failed to invoke reindex function",
-          err instanceof Error ? err.message : err,
-        );
-      });
   }
 
   const config = await getOrgModelConfig(orgId);
@@ -172,6 +183,7 @@ export async function PATCH(request: Request, { params }: Params) {
       embeddingModel: config.embeddingModel,
       currentEmbeddingVersion: config.currentEmbeddingVersion,
       previousEmbeddingVersion: config.previousEmbeddingVersion,
+      reindexStatus: config.reindexStatus,
       isDefault: false,
     },
   });

@@ -2,29 +2,28 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export type KnowledgeSpace = {
+export type GeneralDocument = {
   id: string;
-  name: string;
-  scope: string;
-  project_id: string | null;
+  filename: string;
   created_at: string;
-  summary_title: string | null;
-  summary: string | null;
+  content_type: string | null;
 };
 
-export type UseKnowledgeSpacesReturn = {
-  data: KnowledgeSpace[] | null;
+export type UseGeneralDocumentsReturn = {
+  data: GeneralDocument[] | null;
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
 };
 
-export function useKnowledgeSpaces(orgId: string | null): UseKnowledgeSpacesReturn {
-  const [data, setData] = useState<KnowledgeSpace[] | null>(null);
+export function useGeneralDocuments(
+  orgId: string | null,
+): UseGeneralDocumentsReturn {
+  const [data, setData] = useState<GeneralDocument[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSpaces = useCallback(async () => {
+  const fetchDocuments = useCallback(async () => {
     if (!orgId) {
       setData(null);
       setLoading(false);
@@ -34,18 +33,18 @@ export function useKnowledgeSpaces(orgId: string | null): UseKnowledgeSpacesRetu
     setError(null);
     try {
       const response = await fetch(
-        `/api/knowledge-spaces?orgId=${encodeURIComponent(orgId)}`,
+        `/api/documents?orgId=${encodeURIComponent(orgId)}`,
       );
       if (!response.ok) {
         const payload = (await response.json().catch(() => null)) as
           | { error?: string }
           | null;
-        throw new Error(payload?.error ?? "Failed to load knowledge spaces");
+        throw new Error(payload?.error ?? "Failed to load documents");
       }
       const payload = (await response.json()) as {
-        knowledge_spaces: KnowledgeSpace[];
+        documents: GeneralDocument[];
       };
-      setData(payload.knowledge_spaces ?? []);
+      setData(payload.documents ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setData(null);
@@ -55,13 +54,13 @@ export function useKnowledgeSpaces(orgId: string | null): UseKnowledgeSpacesRetu
   }, [orgId]);
 
   useEffect(() => {
-    void fetchSpaces();
-  }, [fetchSpaces]);
+    void fetchDocuments();
+  }, [fetchDocuments]);
 
   return {
     data,
     loading,
     error,
-    refetch: fetchSpaces,
+    refetch: fetchDocuments,
   };
 }

@@ -567,6 +567,16 @@ export default function OrgSettingsPage() {
                       {t("embeddingPreviousVersion", {
                         version: modelConfig.previousEmbeddingVersion,
                       })}
+                      {modelConfig.reindexStatus === "idle" && (
+                        <span style={{ marginLeft: 6, color: "var(--color-text-muted)" }}>
+                          — {t("embeddingPreviousVersionFallback")}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {modelConfig.reindexStatus === "in_progress" && (
+                    <p style={{ margin: "4px 0 0", color: "var(--color-primary)" }}>
+                      {t("embeddingReindexInProgress")}
                     </p>
                   )}
                 </div>
