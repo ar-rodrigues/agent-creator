@@ -1,7 +1,17 @@
 import { ILlmClient, LlmChatRequest, LlmChatResponse, LlmMessage } from "@/lib/llm/types";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.0-pro";
+const GEMINI_MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+
+function getApiKey(request: LlmChatRequest): string | undefined {
+  return request.googleApiKey?.trim();
+}
+
+/** Strip display suffix like " (gemini)" so the API receives a valid model id. */
+function normalizeModelId(model: string | undefined): string {
+  const raw = model ?? GEMINI_MODEL;
+  const withoutSuffix = raw.includes(" (") ? raw.split(" (")[0].trim() : raw;
+  return withoutSuffix || GEMINI_MODEL;
+}
 
 type GeminiContent = {
   role: "user" | "model";
@@ -17,23 +27,27 @@ type GeminiGenerateContentResponse = {
 
 export class GeminiLlmClient implements ILlmClient {
   async *chatStream(request: LlmChatRequest): AsyncGenerator<string, void, unknown> {
-    if (!GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is not configured");
+    const apiKey = getApiKey(request);
+    if (!apiKey) {
+      throw new Error(
+        "Google (Gemini) API key is not configured. Set it in Org settings (Cloud provider API keys) or via GEMINI_API_KEY.",
+      );
     }
 
-    const model = request.model ?? GEMINI_MODEL;
+    const model = normalizeModelId(request.model);
     const url = new URL(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent`,
     );
-    url.searchParams.set("key", GEMINI_API_KEY);
+    url.searchParams.set("key", apiKey);
     url.searchParams.set("alt", "sse");
 
     const contents: GeminiContent[] = request.messages.map(mapToGeminiContent);
+    const maxOutputTokens = request.maxTokens ?? 512;
     const body = {
       contents,
       generationConfig: {
         temperature: request.temperature ?? 0.2,
-        maxOutputTokens: request.maxTokens ?? 512,
+        maxOutputTokens,
       },
     };
 
@@ -45,7 +59,8 @@ export class GeminiLlmClient implements ILlmClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(text || "Gemini stream request failed");
+      const message = parseGeminiErrorResponse(text);
+      throw new Error(message || "Gemini stream request failed");
     }
 
     const reader = res.body?.getReader();
@@ -96,14 +111,18 @@ export class GeminiLlmClient implements ILlmClient {
   }
 
   async chat(request: LlmChatRequest): Promise<LlmChatResponse> {
-    if (!GEMINI_API_KEY) {
-      throw new Error("GEMINI_API_KEY is not configured");
+    const apiKey = getApiKey(request);
+    if (!apiKey) {
+      throw new Error(
+        "Google (Gemini) API key is not configured. Set it in Org settings under Cloud provider API keys.",
+      );
     }
 
+    const model = normalizeModelId(request.model);
     const url = new URL(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(request.model ?? GEMINI_MODEL)}:generateContent`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,
     );
-    url.searchParams.set("key", GEMINI_API_KEY);
+    url.searchParams.set("key", apiKey);
 
     const contents: GeminiContent[] = request.messages.map(mapToGeminiContent);
 
@@ -125,7 +144,8 @@ export class GeminiLlmClient implements ILlmClient {
 
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(text || "Gemini chat request failed");
+      const message = parseGeminiErrorResponse(text);
+      throw new Error(message || "Gemini chat request failed");
     }
 
     const raw = (await res.json()) as GeminiGenerateContentResponse;
@@ -152,5 +172,19 @@ function mapToGeminiContent(message: LlmMessage): GeminiContent {
     role,
     parts: [{ text: message.content }],
   };
+}
+
+/** Extract a short user-facing message from Gemini API error JSON. */
+function parseGeminiErrorResponse(body: string): string | null {
+  try {
+    const json = JSON.parse(body) as { error?: { message?: string } };
+    const msg = json?.error?.message?.trim();
+    if (msg) {
+      return msg.split("\n")[0].trim();
+    }
+  } catch {
+    // not JSON or unexpected shape
+  }
+  return null;
 }
 

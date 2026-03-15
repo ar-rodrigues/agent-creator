@@ -44,11 +44,15 @@ export default function KnowledgePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lazySummaryRequestedRef = useRef<Set<string>>(new Set());
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [creating, setCreating] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadingFileIndex, setUploadingFileIndex] = useState(0);
+  const [uploadingFileName, setUploadingFileName] = useState<string | null>(null);
+  const [uploadingTotal, setUploadingTotal] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatEntry[]>([]);
@@ -60,6 +64,17 @@ export default function KnowledgePage() {
 
   const generalSpaces = (spaces ?? []).filter((s) => s.scope === "general");
   const firstGeneralSpace = generalSpaces[0] ?? null;
+
+  const overviewTitle = useMemo(() => {
+    const loc = firstGeneralSpace?.summary_i18n?.[locale];
+    const fallback = firstGeneralSpace?.summary_i18n?.en;
+    return loc?.title ?? fallback?.title ?? null;
+  }, [locale, firstGeneralSpace]);
+  const overviewSummary = useMemo(() => {
+    const loc = firstGeneralSpace?.summary_i18n?.[locale];
+    const fallback = firstGeneralSpace?.summary_i18n?.en;
+    return loc?.summary ?? fallback?.summary ?? null;
+  }, [locale, firstGeneralSpace]);
 
   const documentNameMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -74,6 +89,26 @@ export default function KnowledgePage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, ragLoading]);
 
+  // Lazy-generate summary for current locale when missing (e.g. existing space viewed in another language)
+  useEffect(() => {
+    const spaceId = firstGeneralSpace?.id;
+    const i18n = firstGeneralSpace?.summary_i18n;
+    if (!spaceId || !i18n) return;
+
+    const key = `${spaceId}:${locale}`;
+    if (lazySummaryRequestedRef.current.has(key)) return;
+
+    const hasCurrent = i18n[locale]?.title || i18n[locale]?.summary;
+    const hasAny = Object.keys(i18n).some((loc) => i18n[loc]?.title || i18n[loc]?.summary);
+    if (hasCurrent || !hasAny) return;
+
+    lazySummaryRequestedRef.current.add(key);
+    void (async () => {
+      await triggerSummaryUpdate(spaceId, locale);
+      await refetchSpaces();
+    })();
+  }, [locale, firstGeneralSpace, refetchSpaces]);
+
   const refreshSummary = useCallback(
     async (spaceId: string) => {
       setGeneratingSummary(true);
@@ -87,12 +122,32 @@ export default function KnowledgePage() {
     [locale, refetchSpaces],
   );
 
+  const refreshSummaryBothLocales = useCallback(
+    async (spaceId: string) => {
+      setGeneratingSummary(true);
+      try {
+        await Promise.all([
+          triggerSummaryUpdate(spaceId, "en"),
+          triggerSummaryUpdate(spaceId, "es"),
+        ]);
+        await refetchSpaces();
+      } finally {
+        setGeneratingSummary(false);
+      }
+    },
+    [refetchSpaces],
+  );
+
   const uploadFiles = useCallback(
     async (files: File[]) => {
       if (!currentOrgId || !firstGeneralSpace || files.length === 0) return;
       setUploading(true);
+      setUploadingTotal(files.length);
       try {
-        for (const file of files) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setUploadingFileIndex(i + 1);
+          setUploadingFileName(file.name);
           const form = new FormData();
           form.set("file", file);
           form.set("orgId", currentOrgId);
@@ -110,14 +165,28 @@ export default function KnowledgePage() {
         }
         await refetchDocs();
         message.success(t("documentsUploaded"));
-        void refreshSummary(firstGeneralSpace.id);
+        setGeneratingSummary(true);
+        try {
+          await refreshSummaryBothLocales(firstGeneralSpace.id);
+        } finally {
+          setGeneratingSummary(false);
+        }
       } catch (err) {
         message.error(err instanceof Error ? err.message : t("uploadFailed"));
       } finally {
         setUploading(false);
+        setUploadingFileName(null);
+        setUploadingTotal(0);
       }
     },
-    [currentOrgId, firstGeneralSpace, message, refetchDocs, refreshSummary, t],
+    [
+      currentOrgId,
+      firstGeneralSpace,
+      message,
+      refetchDocs,
+      refreshSummaryBothLocales,
+      t,
+    ],
   );
 
   const handleFileInputChange = useCallback(
@@ -258,7 +327,9 @@ export default function KnowledgePage() {
                 content:
                   error === "Cancelled"
                     ? current.content || "Stopped."
-                    : "Something went wrong. Please try again.",
+                    : error && error.length > 0
+                      ? error
+                      : "Something went wrong. Please try again.",
               };
             }
             return next;
@@ -373,10 +444,43 @@ export default function KnowledgePage() {
                   onClick={() => fileInputRef.current?.click()}
                   loading={uploading}
                   block
-                  style={{ marginBottom: "var(--space-2)" }}
+                  style={{
+                    marginBottom: "var(--space-2)",
+                    overflow: "hidden",
+                    minWidth: 0,
+                  }}
                 >
-                  {uploading ? t("indexingDocument") : t("addSources")}
+                  <span
+                    style={{
+                      display: "block",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {uploading && uploadingTotal > 0
+                      ? `${t("indexingDocument")} (${uploadingFileIndex}/${uploadingTotal})`
+                      : uploading
+                        ? t("indexingDocument")
+                        : t("addSources")}
+                  </span>
                 </Button>
+                {uploading && uploadingTotal > 0 && uploadingFileName && (
+                  <p
+                    style={{
+                      margin: 0,
+                      marginBottom: "var(--space-2)",
+                      fontSize: "var(--text-xs)",
+                      color: "var(--color-text-muted)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                    title={uploadingFileName}
+                  >
+                    {uploadingFileIndex}/{uploadingTotal} — {uploadingFileName}
+                  </p>
+                )}
                 <div
                   onDrop={handleDrop}
                   onDragOver={handleDragOver}
@@ -561,13 +665,14 @@ export default function KnowledgePage() {
             >
               {/* Knowledge overview (title + summary) */}
               <KnowledgeOverview
-                title={firstGeneralSpace?.summary_title ?? null}
-                summary={firstGeneralSpace?.summary ?? null}
+                title={overviewTitle}
+                summary={overviewSummary}
                 generating={generatingSummary}
               />
 
               {/* Scrollable messages area */}
               <div
+                className="chat-scroll-area"
                 style={{
                   flex: 1,
                   overflow: "auto",

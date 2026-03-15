@@ -4,6 +4,7 @@ import { getLlmClient } from "@/lib/llm/client";
 import type { LlmProvider, LlmMessage } from "@/lib/llm/types";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
+import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
 
 type GeneralRagRequest = {
   orgId?: string;
@@ -132,6 +133,7 @@ export async function POST(request: Request) {
 
   const systemPrompt = [
     "You are an assistant that answers questions using the provided organization knowledge.",
+    "Always answer in the same language as the user's question (e.g. if the question is in Spanish, respond in Spanish; if in English, respond in English).",
     "Use the context sections below to answer factually.",
     "If the answer is not contained in the context, say you do not know rather than inventing details.",
     "Each context section is numbered starting at 1.",
@@ -155,6 +157,9 @@ export async function POST(request: Request) {
   ];
 
   const effectiveProvider = (requestedProvider ?? orgConfig.chatProvider) as LlmProvider;
+  const chatModel = orgConfig.chatModel ?? undefined;
+  const orgKey =
+    effectiveProvider === "gemini" ? await getGoogleApiKey(orgId) : null;
   const client = getLlmClient(effectiveProvider);
 
   const stream = new ReadableStream({
@@ -163,7 +168,11 @@ export async function POST(request: Request) {
       try {
         for await (const text of client.chatStream({
           messages,
-          model: orgConfig.chatModel ?? undefined,
+          model: chatModel,
+          maxTokens: 4096,
+          ...(effectiveProvider === "gemini" && orgKey
+            ? { googleApiKey: orgKey }
+            : {}),
         })) {
           controller.enqueue(encoder.encode(ndjsonLine({ type: "chunk", text })));
         }

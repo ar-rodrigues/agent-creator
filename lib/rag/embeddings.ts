@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
+import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
 
 type EmbedChunksArgs = {
   orgId: string;
@@ -136,6 +137,78 @@ async function embedOneWithOllama(model: string, input: string): Promise<number[
   );
 }
 
+const GEMINI_EMBED_BASE = "https://generativelanguage.googleapis.com/v1beta";
+
+type GeminiEmbedContentResponse = {
+  embedding?: { values?: number[] };
+};
+
+type GeminiBatchEmbedResponse = {
+  embeddings?: { values?: number[] }[];
+};
+
+/**
+ * Calls Google Generative Language API embedContent (single or batch) for the given model.
+ * Model name should be as in the registry (e.g. text-embedding-004, text-embedding-005).
+ */
+async function embedWithGoogle(
+  apiKey: string,
+  model: string,
+  inputs: string[],
+): Promise<number[][]> {
+  if (inputs.length === 0) return [];
+
+  const modelPath = model.startsWith("models/") ? model : `models/${model}`;
+
+  if (inputs.length === 1) {
+    const url = new URL(`${GEMINI_EMBED_BASE}/${modelPath}:embedContent`);
+    url.searchParams.set("key", apiKey);
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        content: { parts: [{ text: inputs[0] }] },
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `Google embed failed: ${res.status}`);
+    }
+    const data = (await res.json()) as GeminiEmbedContentResponse;
+    const values = data.embedding?.values;
+    if (!Array.isArray(values)) {
+      throw new Error("Google embed response missing embedding.values");
+    }
+    return [values];
+  }
+
+  const url = new URL(`${GEMINI_EMBED_BASE}/${modelPath}:batchEmbedContents`);
+  url.searchParams.set("key", apiKey);
+  const body = {
+    requests: inputs.map((text) => ({
+      model: modelPath,
+      content: { parts: [{ text }] },
+    })),
+  };
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Google batch embed failed: ${res.status}`);
+  }
+  const data = (await res.json()) as GeminiBatchEmbedResponse;
+  const embeddings = data.embeddings;
+  if (!Array.isArray(embeddings) || embeddings.length !== inputs.length) {
+    throw new Error(
+      `Google batch embed returned ${embeddings?.length ?? 0} embeddings, expected ${inputs.length}`,
+    );
+  }
+  return embeddings.map((e) => e.values ?? []);
+}
+
 /**
  * Embeds all chunks for a document using the org's configured embedding model,
  * then updates document_chunks with the vectors and version metadata.
@@ -155,11 +228,23 @@ export async function embedChunksForDocument(
     return;
   }
 
-  if (orgConfig.embeddingProvider !== "ollama") {
+  const isOllama = orgConfig.embeddingProvider === "ollama";
+  const isGemini = orgConfig.embeddingProvider === "gemini";
+  if (!isOllama && !isGemini) {
     console.warn(
-      "embedChunksForDocument: only ollama provider is implemented, skipping",
+      "embedChunksForDocument: unsupported embedding provider, skipping",
     );
     return;
+  }
+
+  if (isGemini) {
+    const apiKey = await getGoogleApiKey(orgId);
+    if (!apiKey) {
+      console.warn(
+        "embedChunksForDocument: Gemini embedding selected but no Google API key (org secret or GEMINI_API_KEY)",
+      );
+      return;
+    }
   }
 
   const version =
@@ -202,10 +287,16 @@ export async function embedChunksForDocument(
 
     let vectors: number[][];
     try {
-      vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
+      if (isGemini) {
+        const apiKey = await getGoogleApiKey(orgId);
+        if (!apiKey) continue;
+        vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, texts);
+      } else {
+        vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
+      }
     } catch (err) {
       console.warn(
-        `embedChunksForDocument: Ollama embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
+        `embedChunksForDocument: embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
         err instanceof Error ? err.message : err,
       );
       continue;
@@ -218,24 +309,32 @@ export async function embedChunksForDocument(
       continue;
     }
 
-    // Parallel update: fire all updates for this batch concurrently instead of sequentially.
+    // Sequential updates to avoid batch failures (e.g. connection pool or lock contention with parallel updates).
     // Using update (not upsert) to avoid triggering the INSERT RLS policy on existing rows.
-    const updateResults = await Promise.all(
-      batch.map(async (chunk, i) => {
-        const embedding = vectors[i];
-        if (!embedding) return null;
-        return supabase
-          .from("document_chunks")
-          .update({
-            embedding,
-            embedding_version: version,
-            embedding_model: orgConfig.embeddingModel,
-          })
-          .eq("id", chunk.id);
-      }),
-    );
-
-    const failures = updateResults.filter((r) => r && r.error).length;
+    let failures = 0;
+    for (let i = 0; i < batch.length; i++) {
+      const chunk = batch[i];
+      const embedding = vectors[i];
+      if (!embedding) continue;
+      const r = await supabase
+        .from("document_chunks")
+        .update({
+          embedding,
+          embedding_version: version,
+          embedding_model: orgConfig.embeddingModel,
+        })
+        .eq("id", chunk.id);
+      if (r.error) {
+        failures++;
+        if (failures === 1) {
+          console.warn(
+            `embedChunksForDocument: chunk update failed (batch ${batchStart}–${batchStart + batch.length - 1})`,
+            r.error?.code,
+            r.error?.message,
+          );
+        }
+      }
+    }
     if (failures > 0) {
       console.warn(
         `embedChunksForDocument: ${failures}/${batch.length} updates failed in batch ${batchStart}–${batchStart + batch.length - 1}`,
@@ -266,9 +365,21 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
     return;
   }
 
-  if (orgConfig.embeddingProvider !== "ollama") {
-    console.warn("reindexChunksForDocument: only ollama provider is implemented, skipping");
+  const isOllama = orgConfig.embeddingProvider === "ollama";
+  const isGemini = orgConfig.embeddingProvider === "gemini";
+  if (!isOllama && !isGemini) {
+    console.warn("reindexChunksForDocument: unsupported embedding provider, skipping");
     return;
+  }
+
+  if (isGemini) {
+    const apiKey = await getGoogleApiKey(orgId);
+    if (!apiKey) {
+      console.warn(
+        "reindexChunksForDocument: Gemini embedding selected but no Google API key (org secret or GEMINI_API_KEY)",
+      );
+      return;
+    }
   }
 
   const { data: chunks, error: fetchError } = await supabase
@@ -304,10 +415,16 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
 
     let vectors: number[][];
     try {
-      vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
+      if (isGemini) {
+        const apiKey = await getGoogleApiKey(orgId);
+        if (!apiKey) continue;
+        vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, texts);
+      } else {
+        vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
+      }
     } catch (err) {
       console.warn(
-        `reindexChunksForDocument: Ollama embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
+        `reindexChunksForDocument: embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
         err instanceof Error ? err.message : err,
       );
       continue;
@@ -359,11 +476,23 @@ export async function embedQueryForOrg(
 ): Promise<number[] | null> {
   const orgConfig = await getOrgModelConfig(orgId);
 
-  if (!orgConfig.embeddingModel?.trim() || orgConfig.embeddingProvider !== "ollama") {
+  if (!orgConfig.embeddingModel?.trim()) {
+    return null;
+  }
+
+  const isOllama = orgConfig.embeddingProvider === "ollama";
+  const isGemini = orgConfig.embeddingProvider === "gemini";
+  if (!isOllama && !isGemini) {
     return null;
   }
 
   try {
+    if (isGemini) {
+      const apiKey = await getGoogleApiKey(orgId);
+      if (!apiKey) return null;
+      const vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, [query]);
+      return vectors[0] ?? null;
+    }
     const vectors = await embedWithOllama(orgConfig.embeddingModel, [query]);
     return vectors[0] ?? null;
   } catch {

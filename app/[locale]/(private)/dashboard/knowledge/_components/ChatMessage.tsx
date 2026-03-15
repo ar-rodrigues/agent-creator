@@ -15,7 +15,7 @@ type ChatMessageProps = {
   entry: ChatEntry;
 };
 
-/** Splits answer text on [N] citation markers and replaces them with SourceBadge. */
+/** Splits answer text on [N] or [N, M, ...] citation markers and replaces them with SourceBadge(es). */
 function renderWithCitations(
   text: string,
   sources: RagSource[],
@@ -24,23 +24,23 @@ function renderWithCitations(
   const sourceMap: Record<number, RagSource> = {};
   for (const s of sources) sourceMap[s.number] = s;
 
-  const parts = text.split(/(\[\d+\])/g);
-  return parts.map((part, i) => {
-    const match = /^\[(\d+)\]$/.exec(part);
+  const parts = text.split(/(\[\d+(?:,\s*\d+)*\])/g);
+  return parts.flatMap((part, i) => {
+    const match = /^\[(\d+(?:,\s*\d+)*)\]$/.exec(part);
     if (match) {
-      const num = parseInt(match[1], 10);
-      const source = sourceMap[num];
-      if (source) {
-        return (
+      const nums = match[1].split(",").map((n) => parseInt(n.trim(), 10));
+      const badges = nums
+        .filter((num) => sourceMap[num])
+        .map((num) => (
           <SourceBadge
-            key={i}
-            source={source}
-            filename={documentNameMap[source.documentId]}
+            key={`${i}-${num}`}
+            source={sourceMap[num]}
+            filename={documentNameMap[sourceMap[num].documentId]}
           />
-        );
-      }
+        ));
+      if (badges.length > 0) return badges;
     }
-    return part;
+    return [part];
   });
 }
 
@@ -58,18 +58,13 @@ const USER_BUBBLE_STYLE: React.CSSProperties = {
 
 const ASSISTANT_BUBBLE_STYLE: React.CSSProperties = {
   alignSelf: "flex-start",
-  maxWidth: "85%",
-  maxHeight: "60vh",
+  maxWidth: "100%",
   padding: "var(--space-3) var(--space-4)",
   borderRadius: "var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm)",
   background: "var(--color-surface-elevated)",
   border: "1px solid var(--color-border)",
   fontSize: "var(--text-sm)",
   lineHeight: 1.7,
-  display: "flex",
-  flexDirection: "column",
-  minHeight: 0,
-  overflow: "hidden",
 };
 
 export function ChatMessage({ entry }: ChatMessageProps) {
@@ -92,14 +87,7 @@ export function ChatMessage({ entry }: ChatMessageProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <div style={ASSISTANT_BUBBLE_STYLE}>
-        <div
-          style={{
-            whiteSpace: "pre-wrap",
-            overflowY: "auto",
-            minHeight: 0,
-            flex: "1 1 auto",
-          }}
-        >
+        <div style={{ whiteSpace: "pre-wrap" }}>
           {isEmpty ? (
             <span style={{ color: "var(--color-text-muted)" }}>Thinking…</span>
           ) : (

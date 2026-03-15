@@ -2,14 +2,19 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+export type SummaryLocale = {
+  title: string;
+  summary: string;
+};
+
 export type KnowledgeSpace = {
   id: string;
   name: string;
   scope: string;
   project_id: string | null;
   created_at: string;
-  summary_title: string | null;
-  summary: string | null;
+  /** Per-locale summary: { "en": { title, summary }, "es": { ... }, ... } */
+  summary_i18n: Record<string, SummaryLocale> | null;
 };
 
 export type UseKnowledgeSpacesReturn = {

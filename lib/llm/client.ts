@@ -17,7 +17,7 @@ export function getLlmClient(provider?: LlmProvider): ILlmClient {
   return cachedClients[resolvedProvider]!;
 }
 
-function createClient(provider: LlmProvider): ILlmClient {
+function createClient(provider: LlmProvider | string): ILlmClient {
   switch (provider) {
     case "local":
     case "ollama":
@@ -25,10 +25,10 @@ function createClient(provider: LlmProvider): ILlmClient {
     case "gemini":
       return new GeminiLlmClient();
     case "claude":
+    case "anthropic":
       return new ClaudeLlmClient();
     default: {
-      const _exhaustiveCheck: never = provider;
-      throw new Error(`Unsupported LLM provider: ${_exhaustiveCheck}`);
+      throw new Error(`Unsupported LLM provider: ${provider}`);
     }
   }
 }

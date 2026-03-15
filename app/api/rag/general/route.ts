@@ -5,6 +5,7 @@ import { getLlmClient } from "@/lib/llm/client";
 import type { LlmProvider, LlmMessage } from "@/lib/llm/types";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
+import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
 
 type GeneralRagRequest = {
   orgId?: string;
@@ -101,6 +102,7 @@ export async function POST(request: Request) {
 
   const systemPrompt = [
     "You are an assistant that answers questions using the provided organization knowledge.",
+    "Always answer in the same language as the user's question (e.g. if the question is in Spanish, respond in Spanish; if in English, respond in English).",
     "Use the context sections below to answer factually.",
     "If the answer is not contained in the context, say you do not know rather than inventing details.",
     "Each context section is numbered starting at 1.",
@@ -125,10 +127,13 @@ export async function POST(request: Request) {
 
   try {
     const effectiveProvider = (requestedProvider ?? orgConfig.chatProvider) as LlmProvider;
+    const orgKey = effectiveProvider === "gemini" ? await getGoogleApiKey(orgId) : null;
     const client = getLlmClient(effectiveProvider);
     const response = await client.chat({
       messages,
       model: orgConfig.chatModel ?? undefined,
+      maxTokens: 4096,
+      ...(effectiveProvider === "gemini" && orgKey ? { googleApiKey: orgKey } : {}),
     });
     const answerMessage = response.messages[response.messages.length - 1];
 

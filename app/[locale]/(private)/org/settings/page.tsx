@@ -580,6 +580,108 @@ export default function OrgSettingsPage() {
                     </p>
                   )}
                 </div>
+
+                {relevantCloudProviders.length > 0 && (
+                  <div
+                    style={{
+                      paddingTop: "var(--space-4)",
+                      marginTop: "var(--space-4)",
+                      borderTop: "1px solid var(--color-border)",
+                    }}
+                  >
+                    <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "1rem", fontWeight: 600 }}>
+                      {t("cloudKeysSectionTitle")}
+                    </h3>
+                    <p style={{ margin: "0 0 var(--space-3)", fontSize: 14, color: "var(--color-text-muted)" }}>
+                      {t("cloudKeysHelp")}
+                    </p>
+                    {providerSecretsLoading && <p>{t("loading")}</p>}
+                    {providerSecrets && (
+                      <Stack gap="md">
+                        {relevantCloudProviders.map((provider) => {
+                          const secret = providerSecrets.find((s) => s.provider === provider) ?? null;
+                          const hasKey = secret?.hasKey ?? false;
+                          const last4 = secret?.last4 ?? null;
+                          const labelKey =
+                            provider === "openai"
+                              ? "openaiLabel"
+                              : provider === "anthropic"
+                                ? "anthropicLabel"
+                                : "googleLabel";
+                          const inputValue =
+                            provider === "openai"
+                              ? openaiKeyInput
+                              : provider === "anthropic"
+                                ? anthropicKeyInput
+                                : googleKeyInput;
+                          const isEditing = editingProvider === provider || !hasKey;
+
+                          return (
+                            <div key={provider}>
+                              <label style={{ display: "block", marginBottom: 4 }}>
+                                {t(labelKey)}
+                              </label>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                                <div style={{ flex: "1 1 260px", minWidth: 220 }}>
+                                  {isEditing ? (
+                                    <Input.Password
+                                      value={inputValue}
+                                      disabled={!canManage}
+                                      placeholder={t("apiKeyPlaceholder")}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        if (provider === "openai") setOpenaiKeyInput(value);
+                                        if (provider === "anthropic") setAnthropicKeyInput(value);
+                                        if (provider === "google") setGoogleKeyInput(value);
+                                      }}
+                                    />
+                                  ) : (
+                                    <Input.Password
+                                      value="********"
+                                      disabled
+                                    />
+                                  )}
+                                </div>
+                                {isEditing ? (
+                                  <Button
+                                    type="primary"
+                                    onClick={() => void handleSaveProviderKey(provider, inputValue)}
+                                    disabled={!canManage || !inputValue.trim()}
+                                    loading={savingProvider === provider}
+                                  >
+                                    {t("saveApiKey")}
+                                  </Button>
+                                ) : (
+                                  canManage && (
+                                    <Button
+                                      type="default"
+                                      onClick={() => {
+                                        setEditingProvider(provider);
+                                        if (provider === "openai") setOpenaiKeyInput("");
+                                        if (provider === "anthropic") setAnthropicKeyInput("");
+                                        if (provider === "google") setGoogleKeyInput("");
+                                      }}
+                                    >
+                                      {t("overwriteApiKey")}
+                                    </Button>
+                                  )
+                                )}
+                              </div>
+                              <p style={{ marginTop: 4, fontSize: 14, color: "var(--color-text-muted)" }}>
+                                {hasKey
+                                  ? last4
+                                    ? t("apiKeyConfiguredMasked", { last4 })
+                                    : t("apiKeyConfigured")
+                                  : t("apiKeyNotConfigured")}
+                              </p>
+                            </div>
+                          );
+                        })}
+                      </Stack>
+                    )}
+                  </div>
+                )}
+
                 {canManage && (
                   <Button
                     type="primary"
@@ -591,105 +693,6 @@ export default function OrgSettingsPage() {
                 )}
               </Stack>
             )}
-          </Stack>
-        </Card>
-
-        <Card>
-          <Stack gap="md">
-            <h2 style={{ margin: 0, fontSize: "1.1rem" }}>
-              {t("cloudKeysSectionTitle")}
-            </h2>
-            {providerSecretsLoading && <p>{t("loading")}</p>}
-            <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-muted)" }}>
-              {t("cloudKeysHelp")}
-            </p>
-            {relevantCloudProviders.length === 0 ? (
-              <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-muted)" }}>
-                {t("cloudKeysSelectModelFirst")}
-              </p>
-            ) : providerSecrets ? (
-              <Stack gap="md">
-                {relevantCloudProviders.map((provider) => {
-                  const secret = providerSecrets.find((s) => s.provider === provider) ?? null;
-                  const hasKey = secret?.hasKey ?? false;
-                  const last4 = secret?.last4 ?? null;
-                  const labelKey =
-                    provider === "openai"
-                      ? "openaiLabel"
-                      : provider === "anthropic"
-                      ? "anthropicLabel"
-                      : "googleLabel";
-                  const inputValue =
-                    provider === "openai"
-                      ? openaiKeyInput
-                      : provider === "anthropic"
-                      ? anthropicKeyInput
-                      : googleKeyInput;
-                  const isEditing = editingProvider === provider || !hasKey;
-
-                  return (
-                    <div key={provider}>
-                      <label style={{ display: "block", marginBottom: 4 }}>
-                        {t(labelKey)}
-                      </label>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <div style={{ flex: "1 1 260px", minWidth: 220 }}>
-                          {isEditing ? (
-                            <Input.Password
-                              value={inputValue}
-                              disabled={!canManage}
-                              placeholder={t("apiKeyPlaceholder")}
-                              onChange={(e) => {
-                                const value = e.target.value;
-                                if (provider === "openai") setOpenaiKeyInput(value);
-                                if (provider === "anthropic") setAnthropicKeyInput(value);
-                                if (provider === "google") setGoogleKeyInput(value);
-                              }}
-                            />
-                          ) : (
-                            <Input.Password
-                              value="********"
-                              disabled
-                            />
-                          )}
-                        </div>
-                        {isEditing ? (
-                          <Button
-                            type="primary"
-                            onClick={() => void handleSaveProviderKey(provider, inputValue)}
-                            disabled={!canManage || !inputValue.trim()}
-                            loading={savingProvider === provider}
-                          >
-                            {t("saveApiKey")}
-                          </Button>
-                        ) : (
-                          canManage && (
-                            <Button
-                              type="default"
-                              onClick={() => {
-                                setEditingProvider(provider);
-                                if (provider === "openai") setOpenaiKeyInput("");
-                                if (provider === "anthropic") setAnthropicKeyInput("");
-                                if (provider === "google") setGoogleKeyInput("");
-                              }}
-                            >
-                              {t("overwriteApiKey")}
-                            </Button>
-                          )
-                        )}
-                      </div>
-                      <p style={{ marginTop: 4, fontSize: 14, color: "var(--color-text-muted)" }}>
-                        {hasKey
-                          ? last4
-                            ? t("apiKeyConfiguredMasked", { last4 })
-                            : t("apiKeyConfigured")
-                          : t("apiKeyNotConfigured")}
-                      </p>
-                    </div>
-                  );
-                })}
-              </Stack>
-            ) : null}
           </Stack>
         </Card>
 

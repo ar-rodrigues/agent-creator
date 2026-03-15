@@ -22,6 +22,11 @@ export type LlmChatRequest = {
    * Temperature / sampling controls. Interpreted per provider.
    */
   temperature?: number;
+  /**
+   * Optional Google (Gemini) API key. When set, used instead of process.env.GEMINI_API_KEY.
+   * Used by RAG/chat when the org has a stored provider secret.
+   */
+  googleApiKey?: string;
 };
 
 export type LlmChatResponse = {
