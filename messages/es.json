@@ -81,7 +81,8 @@
     "overviewTitle": "Resumen del conocimiento",
     "typeQuestion": "Escribe una pregunta…",
     "send": "Enviar",
-    "stop": "Detener"
+    "stop": "Detener",
+    "contextUsageTooltip": "Contexto: {percent}% ({used} / {max} tokens)"
   },
   "home": {
     "title": "Bienvenido",

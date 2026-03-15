@@ -86,9 +86,73 @@ a {
   display: none;
 }
 
-/* Stop button: keep icon visible (contrast on hover) */
-.knowledge-chat-stop-btn .anticon,
-.knowledge-chat-stop-btn:hover .anticon,
-.knowledge-chat-stop-btn:focus .anticon {
+/* Stop button: base state and hover = Cerrar sesión style (dark blue-grey, light text, border) */
+.knowledge-chat-stop-btn,
+.knowledge-chat-stop-btn:focus,
+.knowledge-chat-stop-btn:active {
   color: var(--color-text) !important;
+  background-color: var(--color-surface-elevated) !important;
+  border-color: var(--color-border) !important;
+}
+
+.knowledge-chat-stop-btn:hover {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface-elevated) !important;
+  border-color: var(--color-border) !important;
+  transform: scale(1.05);
+}
+
+.knowledge-chat-stop-btn {
+  transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+/* Send button: hover = same as Cerrar sesión (dark blue-grey, light text, border) */
+.knowledge-chat-send-btn {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.knowledge-chat-send-btn:hover:not(:disabled) {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface-elevated) !important;
+  border-color: var(--color-border) !important;
+  transform: scale(1.05);
+}
+
+/* Dark theme: default buttons (e.g. Cerrar sesión) – normal = elevated style, hover = black + white */
+[data-theme="dark"] .ant-btn:not(.ant-btn-primary):not(.ant-btn-link) {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface-elevated) !important;
+  border-color: var(--color-border) !important;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+[data-theme="dark"] .ant-btn:not(.ant-btn-primary):not(.ant-btn-link):hover,
+[data-theme="dark"] .ant-btn:not(.ant-btn-primary):not(.ant-btn-link):focus {
+  color: #fff !important;
+  background-color: #000 !important;
+  border-color: #333 !important;
+}
+
+[data-theme="dark"] .ant-btn:not(.ant-btn-primary):not(.ant-btn-link):active {
+  color: #fff !important;
+  background-color: #111 !important;
+  border-color: #333 !important;
+}
+
+/* Dark theme: Add sources (black button) – hover = elevated style */
+[data-theme="dark"] .knowledge-add-sources-btn.ant-btn-primary {
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+[data-theme="dark"] .knowledge-add-sources-btn.ant-btn-primary:hover,
+[data-theme="dark"] .knowledge-add-sources-btn.ant-btn-primary:focus {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface-elevated) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .knowledge-add-sources-btn.ant-btn-primary:active {
+  color: var(--color-text) !important;
+  background-color: var(--color-border) !important;
+  border-color: var(--color-text-muted) !important;
 }

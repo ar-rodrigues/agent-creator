@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { App, Button, Modal, Popconfirm } from "antd";
-import { PlusOutlined, SendOutlined, StopOutlined } from "@ant-design/icons";
+import { App, Button, Modal, Popconfirm, Tooltip } from "antd";
+import { PlusOutlined, SendOutlined } from "@ant-design/icons";
 import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useKnowledgeSpaces } from "@/hooks/useKnowledgeSpaces";
@@ -12,6 +12,7 @@ import { useRagGeneral } from "@/hooks/useRagGeneral";
 import { Card } from "@/components/ui/Card";
 import { Container } from "@/components/layout/Container";
 import { Stack } from "@/components/layout/Stack";
+import { estimateTokens, CONTEXT_WINDOW_MAX_TOKENS } from "@/lib/utils/tokens";
 import { ChatMessage } from "./_components/ChatMessage";
 import { KnowledgeOverview } from "./_components/KnowledgeOverview";
 import type { ChatEntry } from "./_components/ChatMessage";
@@ -88,6 +89,20 @@ export default function KnowledgePage() {
     });
     return map;
   }, [documents]);
+
+  const contextUsedTokens = useMemo(() => {
+    const fromMessages = messages.reduce(
+      (sum, m) => sum + estimateTokens(m.content),
+      0,
+    );
+    const fromQuestion = estimateTokens(question);
+    return fromMessages + fromQuestion;
+  }, [messages, question]);
+
+  const contextPercent = Math.min(
+    100,
+    (contextUsedTokens / CONTEXT_WINDOW_MAX_TOKENS) * 100,
+  );
 
   const runSummaryUpdate = useCallback(async (spaceId: string, targetLocale: string) => {
     const key = `${spaceId}:${targetLocale}`;
@@ -329,6 +344,7 @@ export default function KnowledgePage() {
         orgId: currentOrgId,
         question: userQuestion,
         knowledgeSpaceIds: [],
+        messages: messages.map((m) => ({ role: m.role, content: m.content })),
       },
       {
         signal: abortControllerRef.current.signal,
@@ -379,7 +395,7 @@ export default function KnowledgePage() {
         },
       },
     );
-  }, [askRagStreaming, currentOrgId, documentNameMap, question, ragLoading]);
+  }, [askRagStreaming, currentOrgId, documentNameMap, messages, question, ragLoading]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -403,7 +419,7 @@ export default function KnowledgePage() {
     <div
       style={{
         flex: 1,
-        minHeight: 0,
+        minHeight: "100%",
         display: "flex",
         flexDirection: "column",
       }}
@@ -482,6 +498,7 @@ export default function KnowledgePage() {
               <div style={{ marginBottom: "var(--space-4)" }}>
                 <Button
                   type="primary"
+                  className="knowledge-add-sources-btn"
                   icon={<PlusOutlined />}
                   onClick={() => fileInputRef.current?.click()}
                   loading={uploading}
@@ -700,6 +717,7 @@ export default function KnowledgePage() {
                 flex: 1,
                 display: "flex",
                 flexDirection: "column",
+                justifyContent: "flex-start",
                 minHeight: 0,
                 padding: 0,
                 overflow: "hidden",
@@ -749,9 +767,11 @@ export default function KnowledgePage() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* Input area: single message box with button inside */}
+              {/* Input area: single message box with button inside — pinned to bottom */}
               <div
                 style={{
+                  flexShrink: 0,
+                  marginTop: "auto",
                   borderTop: "1px solid var(--color-border)",
                   padding: "var(--space-4)",
                   background: "var(--color-surface)",
@@ -761,7 +781,7 @@ export default function KnowledgePage() {
                   style={{
                     display: "flex",
                     alignItems: "center",
-                    gap: 0,
+                    gap: "var(--space-2)",
                     border: "1px solid var(--color-border)",
                     borderRadius: "var(--radius-lg)",
                     background: "var(--color-input-bg)",
@@ -802,17 +822,59 @@ export default function KnowledgePage() {
                       el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
                     }}
                   />
+                  <Tooltip
+                    title={t("contextUsageTooltip", {
+                      percent: contextPercent.toFixed(1),
+                      used: contextUsedTokens.toLocaleString(),
+                      max: CONTEXT_WINDOW_MAX_TOKENS.toLocaleString(),
+                    })}
+                    placement="top"
+                  >
+                    <div
+                      style={{
+                        flexShrink: 0,
+                        width: 22,
+                        height: 22,
+                        borderRadius: "var(--radius-full)",
+                        background: `conic-gradient(var(--color-primary) 0% ${contextPercent}%, var(--color-border) ${contextPercent}% 100%)`,
+                        padding: 2,
+                        cursor: "default",
+                      }}
+                      aria-hidden
+                    >
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          borderRadius: "var(--radius-full)",
+                          background: "var(--color-input-bg)",
+                        }}
+                      />
+                    </div>
+                  </Tooltip>
                   {ragLoading ? (
                     <Button
-                      icon={<StopOutlined />}
+                      icon={
+                        <span
+                          role="img"
+                          aria-label={t("stop")}
+                          style={{
+                            display: "inline-block",
+                            width: 10,
+                            height: 10,
+                            backgroundColor: "currentColor",
+                            borderRadius: 1,
+                          }}
+                        />
+                      }
                       onClick={() => abortControllerRef.current?.abort()}
                       title={t("stop")}
                       className="knowledge-chat-stop-btn"
                       style={{
                         flexShrink: 0,
-                        width: 40,
-                        height: 40,
-                        minWidth: 40,
+                        width: 28,
+                        height: 28,
+                        minWidth: 28,
                         padding: 0,
                         borderRadius: "var(--radius-full)",
                         display: "flex",
@@ -827,11 +889,12 @@ export default function KnowledgePage() {
                       onClick={() => void handleAsk()}
                       disabled={!question.trim()}
                       title={t("send")}
+                      className="knowledge-chat-send-btn"
                       style={{
                         flexShrink: 0,
-                        width: 40,
-                        height: 40,
-                        minWidth: 40,
+                        width: 28,
+                        height: 28,
+                        minWidth: 28,
                         padding: 0,
                         borderRadius: "var(--radius-full)",
                         display: "flex",

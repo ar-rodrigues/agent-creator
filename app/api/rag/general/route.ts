@@ -6,12 +6,21 @@ import type { LlmProvider, LlmMessage } from "@/lib/llm/types";
 import { retrieveRelevantChunks } from "@/lib/rag/retrieve";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
+import {
+  estimateTokens,
+  CONTEXT_WINDOW_MAX_TOKENS,
+} from "@/lib/utils/tokens";
+
+const RESERVED_OUTPUT_TOKENS = 4096;
+
+type ConversationMessage = { role: "user" | "assistant"; content: string };
 
 type GeneralRagRequest = {
   orgId?: string;
   question?: string;
   knowledgeSpaceIds?: string[];
   provider?: LlmProvider;
+  messages?: ConversationMessage[];
 };
 
 export async function POST(request: Request) {
@@ -29,6 +38,7 @@ export async function POST(request: Request) {
   const question = body?.question?.trim();
   const knowledgeSpaceIds = body?.knowledgeSpaceIds ?? [];
   const requestedProvider = body?.provider;
+  const conversationHistory = body?.messages ?? [];
 
   if (!orgId || !question) {
     return NextResponse.json(
@@ -110,19 +120,34 @@ export async function POST(request: Request) {
     "Example: 'The component has 10 pins [1], and supports voltages up to 1000V [2].'",
   ].join(" ");
 
+  const currentTurnContent = [
+    "Context:",
+    context,
+    "",
+    `Question: ${question}`,
+    "",
+    "Answer concisely and, when appropriate, mention which documents you used.",
+  ].join("\n");
+
+  const systemTokens = estimateTokens(systemPrompt);
+  const currentTurnTokens = estimateTokens(currentTurnContent);
+  const fixedTokens = systemTokens + currentTurnTokens + RESERVED_OUTPUT_TOKENS;
+  const historyBudget = Math.max(0, CONTEXT_WINDOW_MAX_TOKENS - fixedTokens);
+
+  const truncatedHistory: LlmMessage[] = [];
+  let historyTokens = 0;
+  for (let i = 0; i < conversationHistory.length; i++) {
+    const msg = conversationHistory[i];
+    const tokens = estimateTokens(msg.content);
+    if (historyTokens + tokens > historyBudget) break;
+    truncatedHistory.push({ role: msg.role, content: msg.content });
+    historyTokens += tokens;
+  }
+
   const messages: LlmMessage[] = [
     { role: "system", content: systemPrompt },
-    {
-      role: "user",
-      content: [
-        "Context:",
-        context,
-        "",
-        `Question: ${question}`,
-        "",
-        "Answer concisely and, when appropriate, mention which documents you used.",
-      ].join("\n"),
-    },
+    ...truncatedHistory,
+    { role: "user", content: currentTurnContent },
   ];
 
   try {

@@ -19,14 +19,18 @@ export type RagGeneralAnswer = {
     provider: LlmProvider | null;
     model?: string;
     usedSpaces: string[];
+    contextTokensUsed?: number;
   };
 };
+
+export type ConversationMessage = { role: "user" | "assistant"; content: string };
 
 type AskParams = {
   orgId: string;
   question: string;
   knowledgeSpaceIds?: string[];
   provider?: LlmProvider;
+  messages?: ConversationMessage[];
 };
 
 export type RagStreamCallbacks = {

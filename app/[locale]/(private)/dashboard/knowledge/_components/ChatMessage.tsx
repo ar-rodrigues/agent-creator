@@ -25,7 +25,7 @@ function renderWithCitations(
   for (const s of sources) sourceMap[s.number] = s;
 
   const parts = text.split(/(\[\d+(?:,\s*\d+)*\])/g);
-  return parts.flatMap((part, i) => {
+  return parts.flatMap((part, i): ReactNode[] => {
     const match = /^\[(\d+(?:,\s*\d+)*)\]$/.exec(part);
     if (match) {
       const nums = match[1].split(",").map((n) => parseInt(n.trim(), 10));

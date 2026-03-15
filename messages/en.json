@@ -81,7 +81,8 @@
     "overviewTitle": "Knowledge overview",
     "typeQuestion": "Type a question…",
     "send": "Send",
-    "stop": "Stop"
+    "stop": "Stop",
+    "contextUsageTooltip": "Context: {percent}% ({used} / {max} tokens)"
   },
   "home": {
     "title": "Welcome",
