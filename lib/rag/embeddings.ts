@@ -12,6 +12,26 @@ type EmbedChunksArgs = {
   embeddingVersion?: number;
 };
 
+type SupabaseServerClient = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+type ChunkEmbeddingUpdate = {
+  id: string;
+  embedding: number[];
+  embeddingVersion: number;
+  embeddingModel: string;
+};
+
+type ReindexedChunkInsert = {
+  org_id: string;
+  document_id: string;
+  knowledge_space_id: string;
+  chunk_index: number;
+  content: string;
+  embedding: number[];
+  embedding_version: number;
+  embedding_model: string;
+};
+
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 
 type EmbeddingModelMeta = {
@@ -147,9 +167,41 @@ type GeminiBatchEmbedResponse = {
   embeddings?: { values?: number[] }[];
 };
 
+/** Google API model id for display name "Gemini Embedding 2". */
+const GEMINI_EMBEDDING_2_API_MODEL = "text-embedding-005";
+
+const EMBED_API_BATCH_SIZE = 20;
+const EMBEDDING_RPC_BATCH_SIZE = 100;
+const EMBEDDING_RPC_MIN_SPLIT_SIZE = 10;
+const REINDEX_INSERT_BATCH_SIZE = 100;
+const REINDEX_INSERT_MIN_SPLIT_SIZE = 10;
+const MISSING_RPC_CODES = new Set(["PGRST202", "42883"]);
+
+let warnedMissingEmbeddingRpc = false;
+
+function shouldFallbackToLegacyRpcUpdate(error: { code?: string; message?: string }): boolean {
+  if (error.code != null && MISSING_RPC_CODES.has(error.code)) {
+    return true;
+  }
+  const normalizedMessage = (error.message ?? "").toLowerCase();
+  return (
+    normalizedMessage.includes("could not find the function") ||
+    normalizedMessage.includes("type \"vector\" does not exist") ||
+    normalizedMessage.includes("function public.update_chunk_embeddings")
+  );
+}
+
+/**
+ * Resolves registry embedding model name to the model id used by the Google API.
+ */
+function resolveGeminiEmbedModel(registryName: string): string {
+  if (registryName === "Gemini Embedding 2") return GEMINI_EMBEDDING_2_API_MODEL;
+  return registryName;
+}
+
 /**
  * Calls Google Generative Language API embedContent (single or batch) for the given model.
- * Model name should be as in the registry (e.g. text-embedding-004, text-embedding-005).
+ * Model name is from the registry (e.g. Gemini Embedding 2, text-embedding-005); display names are resolved to API ids.
  */
 async function embedWithGoogle(
   apiKey: string,
@@ -158,7 +210,8 @@ async function embedWithGoogle(
 ): Promise<number[][]> {
   if (inputs.length === 0) return [];
 
-  const modelPath = model.startsWith("models/") ? model : `models/${model}`;
+  const apiModel = resolveGeminiEmbedModel(model);
+  const modelPath = apiModel.startsWith("models/") ? apiModel : `models/${apiModel}`;
 
   if (inputs.length === 1) {
     const url = new URL(`${GEMINI_EMBED_BASE}/${modelPath}:embedContent`);
@@ -207,6 +260,117 @@ async function embedWithGoogle(
     );
   }
   return embeddings.map((e) => e.values ?? []);
+}
+
+function buildEmbeddingRpcPayload(rows: ChunkEmbeddingUpdate[]) {
+  return rows.map((row) => ({
+    id: row.id,
+    embedding: row.embedding,
+    embedding_version: row.embeddingVersion,
+    embedding_model: row.embeddingModel,
+  }));
+}
+
+async function updateEmbeddingsViaRpcWithFallback(
+  supabase: SupabaseServerClient,
+  rows: ChunkEmbeddingUpdate[],
+): Promise<{ updated: number; failed: number; rpcCalls: number }> {
+  if (rows.length === 0) {
+    return { updated: 0, failed: 0, rpcCalls: 0 };
+  }
+
+  const { data, error } = await supabase.rpc("update_chunk_embeddings", {
+    payload: buildEmbeddingRpcPayload(rows),
+  });
+
+  if (!error) {
+    const updated =
+      typeof data === "number"
+        ? Math.max(0, Math.min(data, rows.length))
+        : rows.length;
+    const failed = Math.max(0, rows.length - updated);
+    return { updated, failed, rpcCalls: 1 };
+  }
+
+  if (shouldFallbackToLegacyRpcUpdate(error ?? {})) {
+    if (!warnedMissingEmbeddingRpc) {
+      warnedMissingEmbeddingRpc = true;
+      console.warn(
+        "update_chunk_embeddings RPC unavailable or incompatible, falling back to row-by-row updates. Apply latest Supabase migrations to enable fast bulk updates.",
+      );
+    }
+
+    let updated = 0;
+    let failed = 0;
+    for (const row of rows) {
+      const r = await supabase
+        .from("document_chunks")
+        .update({
+          embedding: row.embedding,
+          embedding_version: row.embeddingVersion,
+          embedding_model: row.embeddingModel,
+        })
+        .eq("id", row.id);
+      if (r.error) {
+        failed++;
+      } else {
+        updated++;
+      }
+    }
+    return { updated, failed, rpcCalls: 1 };
+  }
+
+  if (rows.length <= EMBEDDING_RPC_MIN_SPLIT_SIZE) {
+    console.warn(
+      "update_chunk_embeddings RPC failed for terminal batch",
+      error.code,
+      error.message,
+      `batchSize=${rows.length}`,
+    );
+    return { updated: 0, failed: rows.length, rpcCalls: 1 };
+  }
+
+  const splitAt = Math.floor(rows.length / 2);
+  const left = await updateEmbeddingsViaRpcWithFallback(supabase, rows.slice(0, splitAt));
+  const right = await updateEmbeddingsViaRpcWithFallback(supabase, rows.slice(splitAt));
+  return {
+    updated: left.updated + right.updated,
+    failed: left.failed + right.failed,
+    rpcCalls: 1 + left.rpcCalls + right.rpcCalls,
+  };
+}
+
+async function insertReindexedRowsWithFallback(
+  supabase: SupabaseServerClient,
+  rows: ReindexedChunkInsert[],
+): Promise<{ inserted: number; failed: number; calls: number }> {
+  if (rows.length === 0) {
+    return { inserted: 0, failed: 0, calls: 0 };
+  }
+
+  const { error } = await supabase.from("document_chunks").insert(rows);
+  if (!error) {
+    return { inserted: rows.length, failed: 0, calls: 1 };
+  }
+
+  if (rows.length <= REINDEX_INSERT_MIN_SPLIT_SIZE) {
+    console.warn(
+      "reindexChunksForDocument: insert failed for terminal batch",
+      error.code,
+      error.message,
+      `batchSize=${rows.length}`,
+    );
+    return { inserted: 0, failed: rows.length, calls: 1 };
+  }
+
+  const splitAt = Math.floor(rows.length / 2);
+  const left = await insertReindexedRowsWithFallback(supabase, rows.slice(0, splitAt));
+  const right = await insertReindexedRowsWithFallback(supabase, rows.slice(splitAt));
+  return {
+    inserted: left.inserted + right.inserted,
+    failed: left.failed + right.failed,
+    calls: 1 + left.calls + right.calls,
+  };
 }
 
 /**
@@ -275,16 +439,24 @@ export async function embedChunksForDocument(
   // default for the smallest observed working size with local Ollama models.
   const effectiveContextLength = contextLength ?? 150;
 
+  const tEmbedStart = Date.now();
+  let totalEmbedApiMs = 0;
+  let totalDbRpcMs = 0;
+  let totalDbUpdated = 0;
+  let totalDbFailed = 0;
+  let totalRpcCalls = 0;
+  let batchCount = 0;
+
   // Send all chunks in one batch per BATCH_SIZE to stay within Ollama's
   // per-request limits while still getting a single round-trip per batch.
-  const BATCH_SIZE = 20;
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
-    const batch = chunks.slice(batchStart, batchStart + BATCH_SIZE);
+  for (let batchStart = 0; batchStart < chunks.length; batchStart += EMBED_API_BATCH_SIZE) {
+    const batch = chunks.slice(batchStart, batchStart + EMBED_API_BATCH_SIZE);
 
     const texts = batch.map((c) =>
       truncateToContextLength(c.content, effectiveContextLength),
     );
 
+    const tApiStart = Date.now();
     let vectors: number[][];
     try {
       if (isGemini) {
@@ -301,6 +473,7 @@ export async function embedChunksForDocument(
       );
       continue;
     }
+    totalEmbedApiMs += Date.now() - tApiStart;
 
     if (dimension != null && vectors[0]?.length !== dimension) {
       console.warn(
@@ -309,38 +482,56 @@ export async function embedChunksForDocument(
       continue;
     }
 
-    // Sequential updates to avoid batch failures (e.g. connection pool or lock contention with parallel updates).
-    // Using update (not upsert) to avoid triggering the INSERT RLS policy on existing rows.
-    let failures = 0;
+    const rowsToUpdate: ChunkEmbeddingUpdate[] = [];
     for (let i = 0; i < batch.length; i++) {
       const chunk = batch[i];
       const embedding = vectors[i];
       if (!embedding) continue;
-      const r = await supabase
-        .from("document_chunks")
-        .update({
-          embedding,
-          embedding_version: version,
-          embedding_model: orgConfig.embeddingModel,
-        })
-        .eq("id", chunk.id);
-      if (r.error) {
-        failures++;
-        if (failures === 1) {
-          console.warn(
-            `embedChunksForDocument: chunk update failed (batch ${batchStart}–${batchStart + batch.length - 1})`,
-            r.error?.code,
-            r.error?.message,
-          );
-        }
-      }
+      rowsToUpdate.push({
+        id: chunk.id,
+        embedding,
+        embeddingVersion: version,
+        embeddingModel: orgConfig.embeddingModel,
+      });
     }
-    if (failures > 0) {
+
+    const tDbStart = Date.now();
+    let batchUpdated = 0;
+    let batchFailed = 0;
+    let batchRpcCalls = 0;
+
+    for (
+      let updateStart = 0;
+      updateStart < rowsToUpdate.length;
+      updateStart += EMBEDDING_RPC_BATCH_SIZE
+    ) {
+      const updateBatch = rowsToUpdate.slice(
+        updateStart,
+        updateStart + EMBEDDING_RPC_BATCH_SIZE,
+      );
+      const result = await updateEmbeddingsViaRpcWithFallback(supabase, updateBatch);
+      batchUpdated += result.updated;
+      batchFailed += result.failed;
+      batchRpcCalls += result.rpcCalls;
+    }
+
+    totalDbRpcMs += Date.now() - tDbStart;
+    totalDbUpdated += batchUpdated;
+    totalDbFailed += batchFailed;
+    totalRpcCalls += batchRpcCalls;
+    batchCount++;
+
+    if (batchFailed > 0) {
       console.warn(
-        `embedChunksForDocument: ${failures}/${batch.length} updates failed in batch ${batchStart}–${batchStart + batch.length - 1}`,
+        `embedChunksForDocument: ${batchFailed}/${rowsToUpdate.length} RPC updates failed in batch ${batchStart}–${batchStart + batch.length - 1}`,
       );
     }
   }
+
+  const totalMs = Date.now() - tEmbedStart;
+  console.log(
+    `[upload:embedding] documentId=${documentId} totalMs=${totalMs} batchCount=${batchCount} embedApiMs=${totalEmbedApiMs} dbRpcMs=${totalDbRpcMs} rpcCalls=${totalRpcCalls} dbUpdated=${totalDbUpdated} dbFailed=${totalDbFailed} chunkCount=${chunks.length}`,
+  );
 }
 
 type ReindexChunksArgs = {
@@ -406,9 +597,14 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
 
   const effectiveContextLength = contextLength ?? 512;
 
-  const BATCH_SIZE = 20;
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += BATCH_SIZE) {
-    const batch = chunks.slice(batchStart, batchStart + BATCH_SIZE);
+  let totalInsertMs = 0;
+  let totalInserted = 0;
+  let totalInsertFailed = 0;
+  let totalInsertCalls = 0;
+  const pendingInserts: ReindexedChunkInsert[] = [];
+
+  for (let batchStart = 0; batchStart < chunks.length; batchStart += EMBED_API_BATCH_SIZE) {
+    const batch = chunks.slice(batchStart, batchStart + EMBED_API_BATCH_SIZE);
     const texts = batch.map((c) =>
       truncateToContextLength(c.content, effectiveContextLength),
     );
@@ -452,18 +648,40 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
           embedding_model: orgConfig.embeddingModel,
         };
       })
-      .filter(Boolean);
+      .filter((row): row is ReindexedChunkInsert => row != null);
 
     if (newRows.length === 0) continue;
+    pendingInserts.push(...newRows);
 
-    const { error: insertError } = await supabase.from("document_chunks").insert(newRows);
-    if (insertError) {
-      console.warn(
-        `reindexChunksForDocument: failed to insert new version rows in batch starting at ${batchStart}`,
-        insertError.message,
-      );
+    while (pendingInserts.length >= REINDEX_INSERT_BATCH_SIZE) {
+      const insertBatch = pendingInserts.splice(0, REINDEX_INSERT_BATCH_SIZE);
+      const tInsertStart = Date.now();
+      const insertResult = await insertReindexedRowsWithFallback(supabase, insertBatch);
+      totalInsertMs += Date.now() - tInsertStart;
+      totalInserted += insertResult.inserted;
+      totalInsertFailed += insertResult.failed;
+      totalInsertCalls += insertResult.calls;
     }
   }
+
+  if (pendingInserts.length > 0) {
+    const tInsertStart = Date.now();
+    const insertResult = await insertReindexedRowsWithFallback(supabase, pendingInserts);
+    totalInsertMs += Date.now() - tInsertStart;
+    totalInserted += insertResult.inserted;
+    totalInsertFailed += insertResult.failed;
+    totalInsertCalls += insertResult.calls;
+  }
+
+  if (totalInsertFailed > 0) {
+    console.warn(
+      `reindexChunksForDocument: failed to insert ${totalInsertFailed} rows for document ${documentId}`,
+    );
+  }
+
+  console.log(
+    `[reindex:embedding] documentId=${documentId} fromVersion=${fromVersion} toVersion=${toVersion} insertMs=${totalInsertMs} insertCalls=${totalInsertCalls} inserted=${totalInserted} failed=${totalInsertFailed} chunkCount=${chunks.length}`,
+  );
 }
 
 /**

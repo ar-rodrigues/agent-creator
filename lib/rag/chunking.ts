@@ -92,6 +92,7 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
     return;
   }
 
+  const tDownloadStart = Date.now();
   const supabase = await createSupabaseServerClient();
 
   const orgConfig = await getOrgModelConfig(orgId);
@@ -100,6 +101,8 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
   const { data: fileData, error: downloadError } = await supabase.storage
     .from("documents")
     .download(storagePath);
+
+  const downloadMs = Date.now() - tDownloadStart;
 
   if (downloadError || !fileData) {
     console.warn(
@@ -111,6 +114,7 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
 
   const resolvedContentType = contentType || "application/octet-stream";
 
+  const tParseStart = Date.now();
   let text: string;
   if (resolvedContentType === "application/pdf") {
     try {
@@ -134,8 +138,11 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
     console.warn("Skipping chunking for unsupported content type", resolvedContentType);
     return;
   }
+  const parseMs = Date.now() - tParseStart;
 
+  const tChunkStart = Date.now();
   const chunks = chunkDocument({ content: text });
+  const chunkMs = Date.now() - tChunkStart;
 
   if (!chunks.length) {
     return;
@@ -152,10 +159,16 @@ export async function indexDocumentTextForSpaces(args: IndexDocumentArgs): Promi
     })),
   );
 
+  const tInsertStart = Date.now();
   const { error: insertError } = await supabase.from("document_chunks").insert(rows);
+  const insertMs = Date.now() - tInsertStart;
 
   if (insertError) {
     console.warn("Failed to insert document chunks", insertError.message);
   }
+
+  console.log(
+    `[upload:chunking] documentId=${documentId} downloadMs=${downloadMs} parseMs=${parseMs} chunkMs=${chunkMs} insertMs=${insertMs} chunkCount=${chunks.length}`,
+  );
 }
 

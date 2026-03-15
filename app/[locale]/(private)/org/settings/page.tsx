@@ -7,6 +7,7 @@ import { useCurrentOrganization } from "@/hooks/useCurrentOrganization";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useOrgSettings } from "@/hooks/useOrgSettings";
 import { useOrgModelConfig } from "@/hooks/useOrgModelConfig";
+import { useReindex } from "@/contexts/ReindexContext";
 import { useOrgMembers } from "@/hooks/useOrgMembers";
 import type { OrgMember } from "@/hooks/useOrgMembers";
 import { useOrgProviderSecrets } from "@/hooks/useOrgProviderSecrets";
@@ -32,6 +33,7 @@ export default function OrgSettingsPage() {
     error: modelError,
     update: updateModelConfig,
   } = useOrgModelConfig(currentOrgId);
+  const { isReindexing, total: reindexTotal, done: reindexDone } = useReindex();
   const {
     data: providerSecrets,
     loading: providerSecretsLoading,
@@ -60,7 +62,7 @@ export default function OrgSettingsPage() {
     { provider: string; name: string; isLocal: boolean }[]
   >([]);
   const [availableEmbeddingModels, setAvailableEmbeddingModels] = useState<
-    { provider: string; name: string; dimension: number; isLocal: boolean; isAvailable: boolean }[]
+    { provider: string; name: string; dimension: number; isLocal: boolean; isAvailable: boolean; bestFor?: string | null }[]
   >([]);
   const [openaiKeyInput, setOpenaiKeyInput] = useState("");
   const [anthropicKeyInput, setAnthropicKeyInput] = useState("");
@@ -122,6 +124,7 @@ export default function OrgSettingsPage() {
                 dimension: number;
                 isLocal: boolean;
                 isAvailable: boolean;
+                bestFor?: string | null;
               }[];
               chatModels?: {
                 provider: string;
@@ -244,13 +247,32 @@ export default function OrgSettingsPage() {
     }
     setSavingModelConfig(true);
     try {
-      await updateModelConfig({
+      const updated = await updateModelConfig({
         chatProvider: chatProvider.trim(),
         chatModel: chatModel.trim() ? chatModel.trim() : null,
         embeddingProvider: embeddingProvider.trim(),
         embeddingModel: embeddingModel.trim(),
       });
       message.success(t("modelConfigUpdated"));
+      if (updated?.reindexStatus === "in_progress") {
+        // #region agent log
+        fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
+          body: JSON.stringify({
+            sessionId: "028a22",
+            location: "settings/page.tsx:handleSaveModelConfig",
+            message: "dispatching reindex-requested after save",
+            data: { orgId: currentOrgId, reindexStatus: updated.reindexStatus },
+            timestamp: Date.now(),
+            hypothesisId: "A",
+          }),
+        }).catch(() => {});
+        // #endregion
+        window.dispatchEvent(
+          new CustomEvent("reindex-requested", { detail: { orgId: currentOrgId } }),
+        );
+      }
     } catch (err) {
       message.error(
         err instanceof Error ? err.message : t("modelConfigUpdateFailed"),
@@ -287,7 +309,9 @@ export default function OrgSettingsPage() {
     });
 
     return base.map((m) => ({
-      label: `${m.name} (${m.provider}, ${m.dimension}D)`,
+      label: m.bestFor
+        ? `${m.name} (${m.provider}, ${m.dimension}D) — ${m.bestFor}`
+        : `${m.name} (${m.provider}, ${m.dimension}D)`,
       value: m.name,
     }));
   }, [availableEmbeddingModels, embeddingProviderFilter]);
@@ -577,6 +601,11 @@ export default function OrgSettingsPage() {
                   {modelConfig.reindexStatus === "in_progress" && (
                     <p style={{ margin: "4px 0 0", color: "var(--color-primary)" }}>
                       {t("embeddingReindexInProgress")}
+                      {isReindexing && reindexTotal > 0 && (
+                        <span style={{ marginLeft: 8 }}>
+                          ({reindexDone}/{reindexTotal})
+                        </span>
+                      )}
                     </p>
                   )}
                 </div>

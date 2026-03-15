@@ -22,7 +22,7 @@ export type UseOrgModelConfigReturn = {
     chatModel: string | null;
     embeddingProvider: string;
     embeddingModel: string;
-  }) => Promise<void>;
+  }) => Promise<OrgModelConfig | null>;
 };
 
 export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn {
@@ -74,8 +74,8 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
       chatModel: string | null;
       embeddingProvider: string;
       embeddingModel: string;
-    }) => {
-      if (!orgId) return;
+    }): Promise<OrgModelConfig | null> => {
+      if (!orgId) return null;
       setError(null);
       const response = await fetch(`/api/orgs/${orgId}/model-config`, {
         method: "PATCH",
@@ -89,7 +89,7 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
       const body = (await response.json()) as {
         config: OrgModelConfig & { isDefault?: boolean };
       };
-      setData({
+      const config: OrgModelConfig = {
         chatProvider: body.config.chatProvider,
         chatModel: body.config.chatModel,
         embeddingProvider: body.config.embeddingProvider,
@@ -97,7 +97,9 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
         currentEmbeddingVersion: body.config.currentEmbeddingVersion,
         previousEmbeddingVersion: body.config.previousEmbeddingVersion,
         reindexStatus: body.config.reindexStatus ?? "idle",
-      });
+      };
+      setData(config);
+      return config;
     },
     [orgId],
   );

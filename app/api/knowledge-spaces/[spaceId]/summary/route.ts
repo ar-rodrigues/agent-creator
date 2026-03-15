@@ -4,7 +4,7 @@ import { hasPermission } from "@/lib/permissions";
 import { getLlmClient } from "@/lib/llm/client";
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
-import type { LlmMessage, LlmProvider } from "@/lib/llm/types";
+import type { LlmProvider } from "@/lib/llm/types";
 
 type RouteParams = { params: Promise<{ spaceId: string }> };
 
@@ -13,7 +13,59 @@ const LANGUAGE_NAMES: Record<string, string> = {
   en: "English",
 };
 
+function mapSummaryError(err: unknown): { status: number; message: string; reason: string } {
+  const message = err instanceof Error ? err.message : "Failed to generate summary";
+  const normalized = message.toLowerCase();
+
+  if (
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("429")
+  ) {
+    return {
+      status: 429,
+      message: "Summary generation is rate-limited. Please retry in a moment.",
+      reason: "rate_limit",
+    };
+  }
+
+  if (
+    normalized.includes("busy") ||
+    normalized.includes("overload") ||
+    normalized.includes("unavailable")
+  ) {
+    return {
+      status: 503,
+      message: "Summary provider is busy. Please retry shortly.",
+      reason: "provider_busy",
+    };
+  }
+
+  if (normalized.includes("timeout") || normalized.includes("timed out")) {
+    return {
+      status: 504,
+      message: "Summary generation timed out. Please retry.",
+      reason: "timeout",
+    };
+  }
+
+  if (normalized.includes("api key") || normalized.includes("not configured")) {
+    return {
+      status: 400,
+      message,
+      reason: "configuration",
+    };
+  }
+
+  return {
+    status: 500,
+    message,
+    reason: "unknown",
+  };
+}
+
 export async function POST(request: Request, { params }: RouteParams) {
+  const routeStart = Date.now();
   const { spaceId } = await params;
   const supabase = await createSupabaseServerClient();
   const {
@@ -84,6 +136,7 @@ export async function POST(request: Request, { params }: RouteParams) {
 
   try {
     // Step 1: Generate title only (short response; model completes reliably).
+    const titleStart = Date.now();
     const titleResponse = await client.chat({
       messages: [
         {
@@ -104,16 +157,24 @@ export async function POST(request: Request, { params }: RouteParams) {
       maxTokens: 128,
     });
     const titleRaw = titleResponse.messages[titleResponse.messages.length - 1]?.content ?? "";
-    const titleMatch = /^Title:\s*(.+)$/m.exec(titleRaw);
-    const title = titleMatch?.[1]?.trim() ?? null;
+    // Capture full title (model may break across lines); $ in /m matches EOL so we use [\s\S]+ then normalize
+    const titleMatch = /^Title:\s*([\s\S]+)/m.exec(titleRaw);
+    const title = titleMatch?.[1]
+      ? titleMatch[1].trim().replace(/\s+/g, " ").trim()
+      : null;
+    const titleMs = Date.now() - titleStart;
 
     // Step 2: Generate summary only (dedicated call so the model completes the paragraph).
+    // Cap context to avoid input token limits that can cause the model to truncate output.
+    const SUMMARY_CONTEXT_MAX_CHARS = 6000;
+    const summaryContext = contextSnippet.slice(0, SUMMARY_CONTEXT_MAX_CHARS);
+    const summaryStart = Date.now();
     const summaryResponse = await client.chat({
       messages: [
         {
           role: "system",
           content:
-            "You write only a summary paragraph. Output exactly one line starting with 'Summary: ' followed by 3 to 5 complete sentences. The paragraph must end with a period. Do not stop mid-sentence.",
+            "You write only a summary paragraph. Output exactly one line starting with 'Summary: ' followed by 3 to 5 complete sentences. The paragraph must end with a period. Do not stop mid-sentence. Your summary must be at least 150 characters.",
         },
         {
           role: "user",
@@ -121,16 +182,17 @@ export async function POST(request: Request, { params }: RouteParams) {
             `In ${languageName}, write a 3–5 sentence paragraph summarizing the main topics and value of this document collection. Your reply must be exactly: Summary: <your paragraph>`,
             "",
             "Excerpts:",
-            contextSnippet,
+            summaryContext,
           ].join("\n"),
         },
       ],
       ...chatOpts,
-      maxTokens: 1024,
+      maxTokens: 2048,
     });
     const summaryRaw = summaryResponse.messages[summaryResponse.messages.length - 1]?.content ?? "";
     const summaryMatch = /^Summary:\s*([\s\S]+)/m.exec(summaryRaw);
     const summary = summaryMatch?.[1]?.trim() ?? null;
+    const summaryMs = Date.now() - summaryStart;
 
     if (summary != null && summary.length < 80) {
       console.warn(
@@ -156,14 +218,22 @@ export async function POST(request: Request, { params }: RouteParams) {
       .update({ summary_i18n: next })
       .eq("id", spaceId);
 
+    const totalMs = Date.now() - routeStart;
+    console.log(
+      `[summary] spaceId=${spaceId} locale=${locale} provider=${effectiveProvider} totalMs=${totalMs} titleMs=${titleMs} summaryMs=${summaryMs} excerptCount=${chunks.length}`,
+    );
+
     return NextResponse.json({ title, summary });
   } catch (err) {
+    const mapped = mapSummaryError(err);
+    console.warn(
+      `[summary] failed spaceId=${spaceId} locale=${locale} provider=${effectiveProvider} reason=${mapped.reason} message=${mapped.message}`,
+    );
     return NextResponse.json(
       {
-        error:
-          err instanceof Error ? err.message : "Failed to generate summary",
+        error: mapped.message,
       },
-      { status: 500 },
+      { status: mapped.status },
     );
   }
 }

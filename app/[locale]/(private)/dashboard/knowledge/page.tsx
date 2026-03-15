@@ -19,11 +19,15 @@ import type { ChatEntry } from "./_components/ChatMessage";
 const SIDEBAR_WIDTH = 260;
 
 async function triggerSummaryUpdate(spaceId: string, locale: string): Promise<void> {
-  await fetch(`/api/knowledge-spaces/${spaceId}/summary`, {
+  const res = await fetch(`/api/knowledge-spaces/${spaceId}/summary`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ locale }),
   });
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(payload?.error ?? `Summary refresh failed for locale ${locale}`);
+  }
 }
 
 export default function KnowledgePage() {
@@ -45,6 +49,7 @@ export default function KnowledgePage() {
   const chatEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lazySummaryRequestedRef = useRef<Set<string>>(new Set());
+  const summaryInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState("");
@@ -84,6 +89,25 @@ export default function KnowledgePage() {
     return map;
   }, [documents]);
 
+  const runSummaryUpdate = useCallback(async (spaceId: string, targetLocale: string) => {
+    const key = `${spaceId}:${targetLocale}`;
+    const existing = summaryInFlightRef.current.get(key);
+    if (existing) {
+      await existing;
+      return;
+    }
+
+    const task = triggerSummaryUpdate(spaceId, targetLocale);
+    summaryInFlightRef.current.set(key, task);
+    try {
+      await task;
+    } finally {
+      if (summaryInFlightRef.current.get(key) === task) {
+        summaryInFlightRef.current.delete(key);
+      }
+    }
+  }, []);
+
   // Auto-scroll to newest message
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -104,38 +128,48 @@ export default function KnowledgePage() {
 
     lazySummaryRequestedRef.current.add(key);
     void (async () => {
-      await triggerSummaryUpdate(spaceId, locale);
-      await refetchSpaces();
+      try {
+        await runSummaryUpdate(spaceId, locale);
+        await refetchSpaces();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn("Lazy summary refresh failed", msg);
+        message.warning(msg);
+      }
     })();
-  }, [locale, firstGeneralSpace, refetchSpaces]);
+  }, [locale, firstGeneralSpace, message, refetchSpaces, runSummaryUpdate]);
 
   const refreshSummary = useCallback(
     async (spaceId: string) => {
       setGeneratingSummary(true);
       try {
-        await triggerSummaryUpdate(spaceId, locale);
+        await runSummaryUpdate(spaceId, locale);
         await refetchSpaces();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        message.error(msg);
       } finally {
         setGeneratingSummary(false);
       }
     },
-    [locale, refetchSpaces],
+    [locale, message, refetchSpaces, runSummaryUpdate],
   );
 
   const refreshSummaryBothLocales = useCallback(
     async (spaceId: string) => {
       setGeneratingSummary(true);
       try {
-        await Promise.all([
-          triggerSummaryUpdate(spaceId, "en"),
-          triggerSummaryUpdate(spaceId, "es"),
-        ]);
+        await runSummaryUpdate(spaceId, "en");
+        await runSummaryUpdate(spaceId, "es");
         await refetchSpaces();
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        message.error(msg);
       } finally {
         setGeneratingSummary(false);
       }
     },
-    [refetchSpaces],
+    [message, refetchSpaces, runSummaryUpdate],
   );
 
   const uploadFiles = useCallback(
@@ -168,6 +202,14 @@ export default function KnowledgePage() {
         setGeneratingSummary(true);
         try {
           await refreshSummaryBothLocales(firstGeneralSpace.id);
+        } catch (err) {
+          console.warn(
+            "Summary refresh after upload failed",
+            err instanceof Error ? err.message : String(err),
+          );
+          message.warning(
+            err instanceof Error ? err.message : "Documents uploaded, but summary refresh failed.",
+          );
         } finally {
           setGeneratingSummary(false);
         }

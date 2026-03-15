@@ -55,6 +55,21 @@ export async function POST(
       orgConfig.reindexStatus === "in_progress" &&
       orgConfig.previousEmbeddingVersion !== null;
 
+    // #region agent log
+    fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
+      body: JSON.stringify({
+        sessionId: "028a22",
+        location: "reembed/route.ts",
+        message: "reembed called",
+        data: { documentId: doc.id, orgId: doc.org_id, isMigration },
+        timestamp: Date.now(),
+        hypothesisId: "C",
+      }),
+    }).catch(() => {});
+    // #endregion
+
     if (isMigration) {
       await reindexChunksForDocument({
         orgId: doc.org_id,
@@ -65,6 +80,21 @@ export async function POST(
     } else {
       await embedChunksForDocument({ orgId: doc.org_id, documentId: doc.id });
     }
+
+    // #region agent log
+    fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
+      body: JSON.stringify({
+        sessionId: "028a22",
+        location: "reembed/route.ts",
+        message: "reembed completed",
+        data: { documentId: doc.id },
+        timestamp: Date.now(),
+        hypothesisId: "C",
+      }),
+    }).catch(() => {});
+    // #endregion
 
     return NextResponse.json({ ok: true });
   } catch (err) {

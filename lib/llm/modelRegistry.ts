@@ -8,6 +8,7 @@ export type RegisteredEmbeddingModel = {
   isLocal: boolean;
   isEnabled: boolean;
   isAvailable: boolean;
+  bestFor?: string | null;
 };
 
 export type RegisteredChatModel = {
@@ -22,7 +23,7 @@ export async function getAvailableEmbeddingModels(): Promise<RegisteredEmbedding
 
   const { data, error } = await supabase
     .from("embedding_models")
-    .select("provider, name, kind, dimension, is_local, is_enabled")
+    .select("provider, name, kind, dimension, best_for, is_local, is_enabled")
     .eq("kind", "embedding");
 
   if (error || !data) {
@@ -36,7 +37,10 @@ export async function getAvailableEmbeddingModels(): Promise<RegisteredEmbedding
   const matchesOllamaName = (registryName: string) => {
     const withoutLatest = registryName.replace(/:latest$/, "");
     return (
-      localOllamaNames.has(registryName) || localOllamaNames.has(withoutLatest)
+      localOllamaNames.has(registryName) ||
+      localOllamaNames.has(withoutLatest) ||
+      (!registryName.endsWith(":latest") &&
+        localOllamaNames.has(registryName + ":latest"))
     );
   };
 
@@ -50,6 +54,7 @@ export async function getAvailableEmbeddingModels(): Promise<RegisteredEmbedding
       isLocal,
       isEnabled,
       isAvailable: isEnabled,
+      bestFor: row.best_for ?? null,
     };
 
     if (isLocal && row.provider === "ollama") {
@@ -84,7 +89,10 @@ export async function getAvailableChatModels(): Promise<RegisteredChatModel[]> {
   const matchesOllamaName = (registryName: string) => {
     const withoutLatest = registryName.replace(/:latest$/, "");
     return (
-      localOllamaNames.has(registryName) || localOllamaNames.has(withoutLatest)
+      localOllamaNames.has(registryName) ||
+      localOllamaNames.has(withoutLatest) ||
+      (!registryName.endsWith(":latest") &&
+        localOllamaNames.has(registryName + ":latest"))
     );
   };
 

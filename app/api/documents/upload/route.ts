@@ -66,6 +66,7 @@ export async function POST(request: Request) {
     );
   }
 
+  const tStart = Date.now();
   const crypto = await import("crypto");
   const fileId = crypto.randomUUID();
   const ext = file.name.replace(/^.*\./, "") || "bin";
@@ -121,6 +122,9 @@ export async function POST(request: Request) {
     }
   }
 
+  const storageAndInsertMs = Date.now() - tStart;
+  const t0 = Date.now();
+
   try {
     await indexDocumentTextForSpaces({
       orgId: orgId.trim(),
@@ -129,10 +133,17 @@ export async function POST(request: Request) {
       contentType: file.type || null,
       knowledgeSpaceIds,
     });
+    const chunkingMs = Date.now() - t0;
+    const t1 = Date.now();
     await embedChunksForDocument({
       orgId: orgId.trim(),
       documentId: doc.id,
     });
+    const embeddingMs = Date.now() - t1;
+    const totalMs = Date.now() - tStart;
+    console.log(
+      `[upload] filename=${doc.filename} totalMs=${totalMs} storageAndInsertMs=${storageAndInsertMs} chunkingMs=${chunkingMs} embeddingMs=${embeddingMs}`,
+    );
   } catch (err) {
     // Rollback: remove chunks, document record, and storage object
     await supabase

@@ -58,5 +58,20 @@ export async function GET(_request: Request, { params }: Params) {
 
   const pending = prevDocIds.filter((id) => !currDocIdSet.has(id));
 
+  // #region agent log
+  fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
+    body: JSON.stringify({
+      sessionId: "028a22",
+      location: "reindex-pending/route.ts",
+      message: "reindex-pending result",
+      data: { orgId, total: pending.length, prevDocCount: prevDocIds.length },
+      timestamp: Date.now(),
+      hypothesisId: "B",
+    }),
+  }).catch(() => {});
+  // #endregion
+
   return NextResponse.json({ documentIds: pending, total: pending.length });
 }
