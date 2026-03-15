@@ -7,7 +7,11 @@ import { OrgSelector } from "@/components/org/OrgSelector";
 import { ReindexProvider } from "@/contexts/ReindexContext";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
-import { getOrgModuleStates, isSystemAdmin } from "@/lib/modules/server";
+import {
+  type OrgModuleState,
+  getOrgModuleStates,
+  isSystemAdmin,
+} from "@/lib/modules/server";
 import { MODULE_KEYS } from "@/lib/modules/constants";
 import styles from "./layout.module.css";
 
@@ -37,7 +41,9 @@ export default async function PrivateLayout({ children, params }: Props) {
   // Load module states for the first (active) org and system admin status in parallel.
   const activeOrgId = hasOrgs ? orgs![0].id : null;
   const [moduleStates, systemAdmin] = await Promise.all([
-    activeOrgId ? getOrgModuleStates(activeOrgId) : Promise.resolve({}),
+    activeOrgId
+      ? getOrgModuleStates(activeOrgId)
+      : Promise.resolve({} as Record<string, OrgModuleState>),
     isSystemAdmin(user!.id),
   ]);
 
