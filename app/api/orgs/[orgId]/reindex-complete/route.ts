@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { hasPermission } from "@/lib/permissions";
+import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 
 type Params = { params: Promise<{ orgId: string }> };
 
 /**
  * POST /api/orgs/[orgId]/reindex-complete
- * Marks the soft migration as finished by setting reindex_status = 'idle'.
- * Called by the client-side ReindexProvider once all documents have been re-embedded.
+ * Marks the soft migration as finished: deletes chunks at previous_embedding_version (cleanup),
+ * then sets reindex_status = 'idle'. Called by ReindexProvider once all documents have been re-embedded.
  */
 export async function POST(_request: Request, { params }: Params) {
   const supabase = await createSupabaseServerClient();
@@ -27,6 +28,20 @@ export async function POST(_request: Request, { params }: Params) {
   const canManage = await hasPermission(orgId, user.id, "ORG_MANAGE_MEMBERS");
   if (!canManage) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const orgConfig = await getOrgModelConfig(orgId);
+  const previousVersion = orgConfig.previousEmbeddingVersion;
+
+  if (previousVersion != null) {
+    const { error: deleteErr } = await supabase
+      .from("document_chunks")
+      .delete()
+      .eq("org_id", orgId)
+      .eq("embedding_version", previousVersion);
+    if (deleteErr) {
+      console.warn("reindex-complete: failed to delete old chunks", deleteErr.message);
+    }
   }
 
   const { error } = await supabase

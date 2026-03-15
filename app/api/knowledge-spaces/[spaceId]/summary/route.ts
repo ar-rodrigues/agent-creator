@@ -57,6 +57,19 @@ function mapSummaryError(err: unknown): { status: number; message: string; reaso
     };
   }
 
+  if (
+    normalized.includes("spending cap") ||
+    normalized.includes("exceeded its spending cap") ||
+    normalized.includes("billing")
+  ) {
+    return {
+      status: 402,
+      message:
+        "Gemini spending cap exceeded. Raise the cap in Google AI Studio or Cloud Console (Billing).",
+      reason: "spending_cap",
+    };
+  }
+
   return {
     status: 500,
     message,
@@ -130,7 +143,7 @@ export async function POST(request: Request, { params }: RouteParams) {
   const client = getLlmClient(effectiveProvider);
 
   const chatOpts = {
-    model: orgConfig.chatModel ?? undefined,
+    model: orgConfig.chatApiModelId ?? orgConfig.chatModel ?? undefined,
     ...(effectiveProvider === "gemini" && orgKey ? { googleApiKey: orgKey } : {}),
   };
 

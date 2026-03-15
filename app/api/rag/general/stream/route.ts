@@ -112,7 +112,7 @@ export async function POST(request: Request) {
 
   const meta = {
     provider: (requestedProvider ?? orgConfig.chatProvider) as LlmProvider,
-    model: orgConfig.chatModel ?? undefined,
+    model: orgConfig.chatApiModelId ?? orgConfig.chatModel ?? undefined,
     usedSpaces: spaceIdsToUse,
   };
 
@@ -157,7 +157,7 @@ export async function POST(request: Request) {
   ];
 
   const effectiveProvider = (requestedProvider ?? orgConfig.chatProvider) as LlmProvider;
-  const chatModel = orgConfig.chatModel ?? undefined;
+  const chatModel = orgConfig.chatApiModelId ?? orgConfig.chatModel ?? undefined;
   const orgKey =
     effectiveProvider === "gemini" ? await getGoogleApiKey(orgId) : null;
   const client = getLlmClient(effectiveProvider);

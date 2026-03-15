@@ -7,9 +7,21 @@ export type OrgModelConfig = {
   chatModel: string | null;
   embeddingProvider: string;
   embeddingModel: string;
+  embeddingDimension: number | null;
+  embeddingDimensionConfigurable: boolean;
+  embeddingDimensionDefault: number;
+  embeddingDimensionAllowed?: number[];
   currentEmbeddingVersion: number;
   previousEmbeddingVersion: number | null;
   reindexStatus: "idle" | "in_progress" | "error";
+};
+
+export type OrgModelConfigUpdatePayload = {
+  chatProvider: string;
+  chatModel: string | null;
+  embeddingProvider: string;
+  embeddingModel: string;
+  embeddingDimension?: number | null;
 };
 
 export type UseOrgModelConfigReturn = {
@@ -17,12 +29,7 @@ export type UseOrgModelConfigReturn = {
   loading: boolean;
   error: string | null;
   refetch: () => Promise<void>;
-  update: (payload: {
-    chatProvider: string;
-    chatModel: string | null;
-    embeddingProvider: string;
-    embeddingModel: string;
-  }) => Promise<OrgModelConfig | null>;
+  update: (payload: OrgModelConfigUpdatePayload) => Promise<OrgModelConfig | null>;
 };
 
 export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn {
@@ -45,16 +52,27 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
         throw new Error(payload?.error ?? "Failed to load model configuration");
       }
       const payload = (await response.json()) as {
-        config: OrgModelConfig & { isDefault?: boolean };
+        config: OrgModelConfig & {
+          isDefault?: boolean;
+          embeddingDimension?: number | null;
+          embeddingDimensionConfigurable?: boolean;
+          embeddingDimensionDefault?: number;
+          embeddingDimensionAllowed?: number[];
+        };
       };
+      const c = payload.config;
       setData({
-        chatProvider: payload.config.chatProvider,
-        chatModel: payload.config.chatModel,
-        embeddingProvider: payload.config.embeddingProvider,
-        embeddingModel: payload.config.embeddingModel,
-        currentEmbeddingVersion: payload.config.currentEmbeddingVersion,
-        previousEmbeddingVersion: payload.config.previousEmbeddingVersion,
-        reindexStatus: payload.config.reindexStatus ?? "idle",
+        chatProvider: c.chatProvider,
+        chatModel: c.chatModel,
+        embeddingProvider: c.embeddingProvider,
+        embeddingModel: c.embeddingModel,
+        embeddingDimension: c.embeddingDimension ?? null,
+        embeddingDimensionConfigurable: c.embeddingDimensionConfigurable ?? false,
+        embeddingDimensionDefault: c.embeddingDimensionDefault ?? 0,
+        embeddingDimensionAllowed: c.embeddingDimensionAllowed,
+        currentEmbeddingVersion: c.currentEmbeddingVersion,
+        previousEmbeddingVersion: c.previousEmbeddingVersion,
+        reindexStatus: c.reindexStatus ?? "idle",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -69,12 +87,7 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
   }, [fetchConfig]);
 
   const update = useCallback(
-    async (payload: {
-      chatProvider: string;
-      chatModel: string | null;
-      embeddingProvider: string;
-      embeddingModel: string;
-    }): Promise<OrgModelConfig | null> => {
+    async (payload: OrgModelConfigUpdatePayload): Promise<OrgModelConfig | null> => {
       if (!orgId) return null;
       setError(null);
       const response = await fetch(`/api/orgs/${orgId}/model-config`, {
@@ -87,16 +100,27 @@ export function useOrgModelConfig(orgId: string | null): UseOrgModelConfigReturn
         throw new Error(body?.error ?? "Failed to update model configuration");
       }
       const body = (await response.json()) as {
-        config: OrgModelConfig & { isDefault?: boolean };
+        config: OrgModelConfig & {
+          isDefault?: boolean;
+          embeddingDimension?: number | null;
+          embeddingDimensionConfigurable?: boolean;
+          embeddingDimensionDefault?: number;
+          embeddingDimensionAllowed?: number[];
+        };
       };
+      const c = body.config;
       const config: OrgModelConfig = {
-        chatProvider: body.config.chatProvider,
-        chatModel: body.config.chatModel,
-        embeddingProvider: body.config.embeddingProvider,
-        embeddingModel: body.config.embeddingModel,
-        currentEmbeddingVersion: body.config.currentEmbeddingVersion,
-        previousEmbeddingVersion: body.config.previousEmbeddingVersion,
-        reindexStatus: body.config.reindexStatus ?? "idle",
+        chatProvider: c.chatProvider,
+        chatModel: c.chatModel,
+        embeddingProvider: c.embeddingProvider,
+        embeddingModel: c.embeddingModel,
+        embeddingDimension: c.embeddingDimension ?? null,
+        embeddingDimensionConfigurable: c.embeddingDimensionConfigurable ?? false,
+        embeddingDimensionDefault: c.embeddingDimensionDefault ?? 0,
+        embeddingDimensionAllowed: c.embeddingDimensionAllowed,
+        currentEmbeddingVersion: c.currentEmbeddingVersion,
+        previousEmbeddingVersion: c.previousEmbeddingVersion,
+        reindexStatus: c.reindexStatus ?? "idle",
       };
       setData(config);
       return config;

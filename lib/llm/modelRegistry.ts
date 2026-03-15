@@ -5,6 +5,8 @@ export type RegisteredEmbeddingModel = {
   provider: string;
   name: string;
   dimension: number;
+  dimensionConfigurable: boolean;
+  allowedDimensions?: number[];
   isLocal: boolean;
   isEnabled: boolean;
   isAvailable: boolean;
@@ -23,7 +25,7 @@ export async function getAvailableEmbeddingModels(): Promise<RegisteredEmbedding
 
   const { data, error } = await supabase
     .from("embedding_models")
-    .select("provider, name, kind, dimension, best_for, is_local, is_enabled")
+    .select("provider, name, kind, dimension, dimension_configurable, allowed_dimensions, best_for, is_local, is_enabled")
     .eq("kind", "embedding");
 
   if (error || !data) {
@@ -47,10 +49,15 @@ export async function getAvailableEmbeddingModels(): Promise<RegisteredEmbedding
   return data.map((row) => {
     const isLocal = !!row.is_local;
     const isEnabled = !!row.is_enabled;
+    const allowedDimensions = Array.isArray(row.allowed_dimensions)
+      ? (row.allowed_dimensions as number[]).filter((n) => typeof n === "number")
+      : undefined;
     const base: RegisteredEmbeddingModel = {
       provider: row.provider,
       name: row.name,
       dimension: row.dimension ?? 0,
+      dimensionConfigurable: !!row.dimension_configurable,
+      ...(allowedDimensions?.length ? { allowedDimensions } : {}),
       isLocal,
       isEnabled,
       isAvailable: isEnabled,

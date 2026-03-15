@@ -7,9 +7,9 @@ type Params = { params: Promise<{ orgId: string }> };
 
 /**
  * GET /api/orgs/[orgId]/reindex-pending
- * Returns the list of document IDs that have chunks at previous_embedding_version
- * but not yet at current_embedding_version. Used by the ReindexProvider to resume
- * or start the background re-embedding loop.
+ * Returns document IDs that have chunks at any version other than current_embedding_version.
+ * This includes docs with chunks only at older versions (e.g. after failed reindexes), so
+ * they get re-embedded to the current version. Used by ReindexProvider for the re-embed loop.
  */
 export async function GET(_request: Request, { params }: Params) {
   const supabase = await createSupabaseServerClient();
@@ -32,46 +32,24 @@ export async function GET(_request: Request, { params }: Params) {
   }
 
   const orgConfig = await getOrgModelConfig(orgId);
-
-  if (orgConfig.previousEmbeddingVersion === null) {
-    return NextResponse.json({ documentIds: [], total: 0 });
-  }
-
-  const prevVersion = orgConfig.previousEmbeddingVersion;
   const currVersion = orgConfig.currentEmbeddingVersion;
 
-  const [prevResult, currResult] = await Promise.all([
-    supabase
-      .from("document_chunks")
-      .select("document_id")
-      .eq("org_id", orgId)
-      .eq("embedding_version", prevVersion),
-    supabase
-      .from("document_chunks")
-      .select("document_id")
-      .eq("org_id", orgId)
-      .eq("embedding_version", currVersion),
-  ]);
+  // Documents that already have chunks at current version (no need to re-embed).
+  const { data: currChunks } = await supabase
+    .from("document_chunks")
+    .select("document_id")
+    .eq("org_id", orgId)
+    .eq("embedding_version", currVersion);
+  const currDocIdSet = new Set((currChunks ?? []).map((r) => r.document_id as string));
 
-  const prevDocIds = [...new Set((prevResult.data ?? []).map((r) => r.document_id as string))];
-  const currDocIdSet = new Set((currResult.data ?? []).map((r) => r.document_id as string));
-
-  const pending = prevDocIds.filter((id) => !currDocIdSet.has(id));
-
-  // #region agent log
-  fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-    body: JSON.stringify({
-      sessionId: "028a22",
-      location: "reindex-pending/route.ts",
-      message: "reindex-pending result",
-      data: { orgId, total: pending.length, prevDocCount: prevDocIds.length },
-      timestamp: Date.now(),
-      hypothesisId: "B",
-    }),
-  }).catch(() => {});
-  // #endregion
+  // Documents that have at least one chunk at any other version (need re-embed to current).
+  const { data: staleChunks } = await supabase
+    .from("document_chunks")
+    .select("document_id")
+    .eq("org_id", orgId)
+    .neq("embedding_version", currVersion);
+  const staleDocIds = [...new Set((staleChunks ?? []).map((r) => r.document_id as string))];
+  const pending = staleDocIds.filter((id) => !currDocIdSet.has(id));
 
   return NextResponse.json({ documentIds: pending, total: pending.length });
 }

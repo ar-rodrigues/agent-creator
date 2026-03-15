@@ -75,12 +75,16 @@ const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
 
 type EmbeddingModelMeta = {
   dimension: number | null;
+  dimensionConfigurable: boolean;
+  allowedDimensions: number[] | null;
   /** Max tokens per input. Used to truncate chunks before sending to Ollama. */
   contextLength: number | null;
+  /** Model id sent to the provider API; same column for all providers (backfilled from name where needed). */
+  apiModelId: string | null;
 };
 
 /**
- * Fetches dimension and context_length for a provider+model from the registry.
+ * Fetches dimension, dimension_configurable, allowed_dimensions, context_length, and api_model_id for a provider+model from the registry.
  */
 async function getEmbeddingModelMeta(
   provider: string,
@@ -89,16 +93,34 @@ async function getEmbeddingModelMeta(
   const supabase = await createSupabaseServerClient();
   const { data } = await supabase
     .from("embedding_models")
-    .select("dimension, context_length")
+    .select("dimension, dimension_configurable, allowed_dimensions, context_length, api_model_id")
     .eq("provider", provider)
     .eq("name", modelName)
     .eq("kind", "embedding")
     .maybeSingle();
 
+  const allowedDimensions = Array.isArray(data?.allowed_dimensions)
+    ? (data.allowed_dimensions as number[]).filter((n) => typeof n === "number")
+    : null;
+
   return {
     dimension: (data?.dimension as number | null) ?? null,
+    dimensionConfigurable: !!data?.dimension_configurable,
+    allowedDimensions: allowedDimensions?.length ? allowedDimensions : null,
     contextLength: (data?.context_length as number | null) ?? null,
+    apiModelId: (data?.api_model_id as string | null) ?? null,
   };
+}
+
+function getEffectiveDimension(
+  registryDimension: number | null,
+  dimensionConfigurable: boolean,
+  orgOverride: number | null,
+): number | null {
+  if (dimensionConfigurable && orgOverride != null && orgOverride > 0) {
+    return orgOverride;
+  }
+  return registryDimension;
 }
 
 /**
@@ -116,6 +138,7 @@ function truncateToContextLength(text: string, contextLength: number): string {
  * Calls Ollama /api/embed with a batch of inputs in a single HTTP request.
  * Ollama applies its context window per-input, not across the whole batch,
  * so sending N inputs costs one round-trip rather than N.
+ * When dimension is provided (for configurable models), requests that output size.
  * Falls back to one-by-one processing with progressive truncation if the
  * batch call fails (e.g. a single item still exceeds the context window
  * after pre-truncation).
@@ -123,13 +146,22 @@ function truncateToContextLength(text: string, contextLength: number): string {
 async function embedWithOllama(
   model: string,
   inputs: string[],
+  dimension?: number,
 ): Promise<number[][]> {
   if (inputs.length === 0) return [];
+
+  const body: { model: string; input: string[]; dimensions?: number } = {
+    model,
+    input: inputs,
+  };
+  if (dimension != null && dimension > 0) {
+    body.dimensions = dimension;
+  }
 
   const res = await fetch(`${OLLAMA_BASE_URL}/api/embed`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, input: inputs }),
+    body: JSON.stringify(body),
   });
 
   if (res.ok) {
@@ -146,7 +178,7 @@ async function embedWithOllama(
 
   const results: number[][] = [];
   for (const input of inputs) {
-    results.push(await embedOneWithOllama(model, input));
+    results.push(await embedOneWithOllama(model, input, dimension));
   }
   return results;
 }
@@ -155,15 +187,28 @@ async function embedWithOllama(
  * Single-item embed with progressive truncation on context-length errors.
  * Only called as fallback when the batch request fails.
  */
-async function embedOneWithOllama(model: string, input: string): Promise<number[]> {
+async function embedOneWithOllama(
+  model: string,
+  input: string,
+  dimension?: number,
+): Promise<number[]> {
   let text = input;
   const MAX_ATTEMPTS = 4;
 
+  const body: { model: string; input: string; dimensions?: number } = {
+    model,
+    input: text,
+  };
+  if (dimension != null && dimension > 0) {
+    body.dimensions = dimension;
+  }
+
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    body.input = text;
     const res = await fetch(`${OLLAMA_BASE_URL}/api/embed`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model, input: text }),
+      body: JSON.stringify(body),
     });
 
     if (res.ok) {
@@ -205,9 +250,6 @@ type GeminiEmbedContentResponse = {
 type GeminiBatchEmbedResponse = {
   embeddings?: { values?: number[] }[];
 };
-
-/** Google API model id for display name "Gemini Embedding 2". */
-const GEMINI_EMBEDDING_2_API_MODEL = "text-embedding-005";
 
 const EMBED_API_BATCH_SIZE_LOW = 20;
 const EMBED_API_BATCH_SIZE_HIGH = 50;
@@ -320,36 +362,35 @@ function shouldFallbackToLegacyRpcUpdate(error: { code?: string; message?: strin
 }
 
 /**
- * Resolves registry embedding model name to the model id used by the Google API.
- */
-function resolveGeminiEmbedModel(registryName: string): string {
-  if (registryName === "Gemini Embedding 2") return GEMINI_EMBEDDING_2_API_MODEL;
-  return registryName;
-}
-
-/**
  * Calls Google Generative Language API embedContent (single or batch) for the given model.
- * Model name is from the registry (e.g. Gemini Embedding 2, text-embedding-005); display names are resolved to API ids.
+ * The model id is always from the registry api_model_id (same pattern as Ollama and other providers).
+ * When dimension is provided, sends outputDimensionality so Gemini returns that size (e.g. 768).
  */
 async function embedWithGoogle(
   apiKey: string,
   model: string,
   inputs: string[],
+  dimension?: number,
 ): Promise<number[][]> {
   if (inputs.length === 0) return [];
 
-  const apiModel = resolveGeminiEmbedModel(model);
-  const modelPath = apiModel.startsWith("models/") ? apiModel : `models/${apiModel}`;
+  const modelPath = model.startsWith("models/") ? model : `models/${model}`;
+  const outputDim =
+    dimension != null && Number.isInteger(dimension) && dimension > 0
+      ? dimension
+      : undefined;
 
   if (inputs.length === 1) {
     const url = new URL(`${GEMINI_EMBED_BASE}/${modelPath}:embedContent`);
     url.searchParams.set("key", apiKey);
+    const body: { content: { parts: [{ text: string }] }; outputDimensionality?: number } = {
+      content: { parts: [{ text: inputs[0] }] },
+    };
+    if (outputDim != null) body.outputDimensionality = outputDim;
     const res = await fetch(url.toString(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: { parts: [{ text: inputs[0] }] },
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
@@ -365,16 +406,20 @@ async function embedWithGoogle(
 
   const url = new URL(`${GEMINI_EMBED_BASE}/${modelPath}:batchEmbedContents`);
   url.searchParams.set("key", apiKey);
-  const body = {
-    requests: inputs.map((text) => ({
-      model: modelPath,
-      content: { parts: [{ text }] },
-    })),
+  const batchBody = {
+    requests: inputs.map((text) => {
+      const req: { model: string; content: { parts: [{ text: string }] }; outputDimensionality?: number } = {
+        model: modelPath,
+        content: { parts: [{ text }] },
+      };
+      if (outputDim != null) req.outputDimensionality = outputDim;
+      return req;
+    }),
   };
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(batchBody),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -558,10 +603,18 @@ export async function embedChunksForDocument(
     return;
   }
 
-  const { dimension, contextLength } = await getEmbeddingModelMeta(
+  const meta = await getEmbeddingModelMeta(
     orgConfig.embeddingProvider,
     orgConfig.embeddingModel,
   );
+  const { contextLength } = meta;
+  const effectiveDimension = getEffectiveDimension(
+    meta.dimension,
+    meta.dimensionConfigurable,
+    orgConfig.embeddingDimension,
+  );
+  const embeddingApiModelId =
+    meta.apiModelId?.trim() || orgConfig.embeddingModel;
 
   // Use registry context length; fall back to 150 tokens as a conservative
   // default for the smallest observed working size with local Ollama models.
@@ -581,7 +634,7 @@ export async function embedChunksForDocument(
       concurrency = await runTierProbe({
         orgId,
         isGemini,
-        embeddingModel: orgConfig.embeddingModel,
+        embeddingModel: embeddingApiModelId,
         probeTexts,
       });
     }
@@ -626,11 +679,16 @@ export async function embedChunksForDocument(
         if (isGemini && geminiApiKey) {
           return embedWithGoogle(
             geminiApiKey,
-            orgConfig.embeddingModel,
+            embeddingApiModelId,
             texts,
+            effectiveDimension ?? undefined,
           );
         }
-        return embedWithOllama(orgConfig.embeddingModel, texts);
+        return embedWithOllama(
+          orgConfig.embeddingModel,
+          texts,
+          effectiveDimension ?? undefined,
+        );
       });
     } catch (err) {
       console.warn(
@@ -647,9 +705,9 @@ export async function embedChunksForDocument(
     }
     const embedApiMs = Date.now() - tApiStart;
 
-    if (dimension != null && vectors[0]?.length !== dimension) {
+    if (effectiveDimension != null && vectors[0]?.length !== effectiveDimension) {
       console.warn(
-        `embedChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, registry says ${dimension}. Skipping batch.`,
+        `embedChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, expected ${effectiveDimension}. Skipping batch.`,
       );
       return { embedApiMs, dbRpcMs: 0, updated: 0, failed: 0, rpcCalls: 0 };
     }
@@ -715,7 +773,7 @@ export async function embedChunksForDocument(
   const totalRpcCalls = results.reduce((s, r) => s + r.rpcCalls, 0);
   const totalMs = Date.now() - tEmbedStart;
   console.log(
-    `[upload:embedding] documentId=${documentId} totalMs=${totalMs} batchCount=${results.length} embedApiMs=${totalEmbedApiMs} dbRpcMs=${totalDbRpcMs} rpcCalls=${totalRpcCalls} dbUpdated=${totalDbUpdated} dbFailed=${totalDbFailed} chunkCount=${chunks.length}`,
+    `[upload:embedding] documentId=${documentId} concurrency=${concurrency} batchSize=${effectiveBatchSize} totalMs=${totalMs} batchCount=${results.length} embedApiMs=${totalEmbedApiMs} dbRpcMs=${totalDbRpcMs} rpcCalls=${totalRpcCalls} dbUpdated=${totalDbUpdated} dbFailed=${totalDbFailed} chunkCount=${chunks.length}`,
   );
 }
 
@@ -775,10 +833,18 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
     return;
   }
 
-  const { dimension, contextLength } = await getEmbeddingModelMeta(
+  const meta = await getEmbeddingModelMeta(
     orgConfig.embeddingProvider,
     orgConfig.embeddingModel,
   );
+  const { contextLength } = meta;
+  const effectiveDimension = getEffectiveDimension(
+    meta.dimension,
+    meta.dimensionConfigurable,
+    orgConfig.embeddingDimension,
+  );
+  const embeddingApiModelId =
+    meta.apiModelId?.trim() || orgConfig.embeddingModel;
 
   const effectiveContextLength = contextLength ?? 512;
 
@@ -796,7 +862,7 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
       concurrency = await runTierProbe({
         orgId,
         isGemini,
-        embeddingModel: orgConfig.embeddingModel,
+        embeddingModel: embeddingApiModelId,
         probeTexts,
       });
     }
@@ -837,11 +903,16 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
         if (isGemini && geminiApiKey) {
           return embedWithGoogle(
             geminiApiKey,
-            orgConfig.embeddingModel,
+            embeddingApiModelId,
             texts,
+            effectiveDimension ?? undefined,
           );
         }
-        return embedWithOllama(orgConfig.embeddingModel, texts);
+        return embedWithOllama(
+          orgConfig.embeddingModel,
+          texts,
+          effectiveDimension ?? undefined,
+        );
       });
     } catch (err) {
       console.warn(
@@ -851,9 +922,9 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
       return [];
     }
 
-    if (dimension != null && vectors[0]?.length !== dimension) {
+    if (effectiveDimension != null && vectors[0]?.length !== effectiveDimension) {
       console.warn(
-        `reindexChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, registry says ${dimension}. Skipping batch.`,
+        `reindexChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, expected ${effectiveDimension}. Skipping batch.`,
       );
       return [];
     }
@@ -907,7 +978,7 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
   }
 
   console.log(
-    `[reindex:embedding] documentId=${documentId} fromVersion=${fromVersion} toVersion=${toVersion} insertMs=${totalInsertMs} insertCalls=${totalInsertCalls} inserted=${totalInserted} failed=${totalInsertFailed} chunkCount=${chunks.length}`,
+    `[reindex:embedding] documentId=${documentId} concurrency=${concurrency} batchSize=${effectiveBatchSize} fromVersion=${fromVersion} toVersion=${toVersion} insertMs=${totalInsertMs} insertCalls=${totalInsertCalls} inserted=${totalInserted} failed=${totalInsertFailed} chunkCount=${chunks.length}`,
   );
 }
 
@@ -935,10 +1006,39 @@ export async function embedQueryForOrg(
     if (isGemini) {
       const apiKey = await getGoogleApiKey(orgId);
       if (!apiKey) return null;
-      const vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, [query]);
+      const meta = await getEmbeddingModelMeta(
+        orgConfig.embeddingProvider,
+        orgConfig.embeddingModel,
+      );
+      const effectiveDimension = getEffectiveDimension(
+        meta.dimension,
+        meta.dimensionConfigurable,
+        orgConfig.embeddingDimension,
+      );
+      const apiModelId =
+        meta.apiModelId?.trim() || orgConfig.embeddingModel;
+      const vectors = await embedWithGoogle(
+        apiKey,
+        apiModelId,
+        [query],
+        effectiveDimension ?? undefined,
+      );
       return vectors[0] ?? null;
     }
-    const vectors = await embedWithOllama(orgConfig.embeddingModel, [query]);
+    const meta = await getEmbeddingModelMeta(
+      orgConfig.embeddingProvider,
+      orgConfig.embeddingModel,
+    );
+    const effectiveDimension = getEffectiveDimension(
+      meta.dimension,
+      meta.dimensionConfigurable,
+      orgConfig.embeddingDimension,
+    );
+    const vectors = await embedWithOllama(
+      orgConfig.embeddingModel,
+      [query],
+      effectiveDimension ?? undefined,
+    );
     return vectors[0] ?? null;
   } catch {
     return null;

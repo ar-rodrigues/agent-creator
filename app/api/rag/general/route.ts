@@ -131,7 +131,7 @@ export async function POST(request: Request) {
     const client = getLlmClient(effectiveProvider);
     const response = await client.chat({
       messages,
-      model: orgConfig.chatModel ?? undefined,
+      model: orgConfig.chatApiModelId ?? orgConfig.chatModel ?? undefined,
       maxTokens: 4096,
       ...(effectiveProvider === "gemini" && orgKey ? { googleApiKey: orgKey } : {}),
     });

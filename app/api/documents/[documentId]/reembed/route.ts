@@ -55,46 +55,32 @@ export async function POST(
       orgConfig.reindexStatus === "in_progress" &&
       orgConfig.previousEmbeddingVersion !== null;
 
-    // #region agent log
-    fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-      body: JSON.stringify({
-        sessionId: "028a22",
-        location: "reembed/route.ts",
-        message: "reembed called",
-        data: { documentId: doc.id, orgId: doc.org_id, isMigration },
-        timestamp: Date.now(),
-        hypothesisId: "C",
-      }),
-    }).catch(() => {});
-    // #endregion
-
     if (isMigration) {
-      await reindexChunksForDocument({
-        orgId: doc.org_id,
-        documentId: doc.id,
-        fromVersion: orgConfig.previousEmbeddingVersion!,
-        toVersion: orgConfig.currentEmbeddingVersion,
-      });
+      const toVersion = orgConfig.currentEmbeddingVersion;
+      // Use the document's actual chunk version as source (may be older than previous_embedding_version
+      // if earlier reindexes failed, e.g. dimension mismatch).
+      const { data: docChunks } = await supabase
+        .from("document_chunks")
+        .select("embedding_version")
+        .eq("org_id", doc.org_id)
+        .eq("document_id", doc.id)
+        .lt("embedding_version", toVersion)
+        .order("embedding_version", { ascending: false })
+        .limit(1);
+      const fromVersion = docChunks?.[0]?.embedding_version as number | undefined;
+      if (fromVersion == null) {
+        // Document has no chunks below current version (e.g. already at current), nothing to re-embed.
+      } else {
+        await reindexChunksForDocument({
+          orgId: doc.org_id,
+          documentId: doc.id,
+          fromVersion,
+          toVersion,
+        });
+      }
     } else {
       await embedChunksForDocument({ orgId: doc.org_id, documentId: doc.id });
     }
-
-    // #region agent log
-    fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-      body: JSON.stringify({
-        sessionId: "028a22",
-        location: "reembed/route.ts",
-        message: "reembed completed",
-        data: { documentId: doc.id },
-        timestamp: Date.now(),
-        hypothesisId: "C",
-      }),
-    }).catch(() => {});
-    // #endregion
 
     return NextResponse.json({ ok: true });
   } catch (err) {

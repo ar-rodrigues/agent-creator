@@ -33,20 +33,6 @@ export function ReindexProvider({ children }: { children: React.ReactNode }) {
   const generationRef = useRef(0);
 
   const runReindex = useCallback(async (orgId: string, generation: number) => {
-    // #region agent log
-    fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-      body: JSON.stringify({
-        sessionId: "028a22",
-        location: "ReindexContext.tsx:runReindex",
-        message: "runReindex started",
-        data: { orgId, generation },
-        timestamp: Date.now(),
-        hypothesisId: "A",
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       const pendingRes = await fetch(`/api/orgs/${orgId}/reindex-pending`);
       if (!pendingRes.ok || generationRef.current !== generation) return;
@@ -56,23 +42,11 @@ export function ReindexProvider({ children }: { children: React.ReactNode }) {
         total: number;
       };
 
-      // #region agent log
-      fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-        body: JSON.stringify({
-          sessionId: "028a22",
-          location: "ReindexContext.tsx:reindex-pending result",
-          message: "reindex-pending returned",
-          data: { total, documentCount: documentIds?.length ?? 0 },
-          timestamp: Date.now(),
-          hypothesisId: "B",
-        }),
-      }).catch(() => {});
-      // #endregion
-
       if (total === 0) {
         await fetch(`/api/orgs/${orgId}/reindex-complete`, { method: "POST" });
+        if (generationRef.current === generation) {
+          window.dispatchEvent(new CustomEvent("reindex-finished", { detail: { orgId } }));
+        }
         return;
       }
 
@@ -88,6 +62,7 @@ export function ReindexProvider({ children }: { children: React.ReactNode }) {
 
       if (generationRef.current === generation) {
         await fetch(`/api/orgs/${orgId}/reindex-complete`, { method: "POST" });
+        window.dispatchEvent(new CustomEvent("reindex-finished", { detail: { orgId } }));
       }
     } finally {
       if (generationRef.current === generation) {
@@ -103,41 +78,12 @@ export function ReindexProvider({ children }: { children: React.ReactNode }) {
     setState({ isReindexing: false, total: 0, done: 0 });
 
     void (async () => {
-      // #region agent log
-      fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-        body: JSON.stringify({
-          sessionId: "028a22",
-          location: "ReindexContext.tsx:useEffect",
-          message: "fetching model-config on mount/org change",
-          data: { currentOrgId, generation },
-          timestamp: Date.now(),
-          hypothesisId: "A",
-        }),
-      }).catch(() => {});
-      // #endregion
       const res = await fetch(`/api/orgs/${currentOrgId}/model-config`);
       if (!res.ok || generationRef.current !== generation) return;
 
       const payload = (await res.json()) as {
         config?: { reindexStatus?: string };
       };
-
-      // #region agent log
-      fetch("http://127.0.0.1:7607/ingest/e112d8ee-afe5-4f41-b25a-54d819e96ee7", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "028a22" },
-        body: JSON.stringify({
-          sessionId: "028a22",
-          location: "ReindexContext.tsx:model-config result",
-          message: "model-config received",
-          data: { reindexStatus: payload.config?.reindexStatus },
-          timestamp: Date.now(),
-          hypothesisId: "A",
-        }),
-      }).catch(() => {});
-      // #endregion
 
       if (payload.config?.reindexStatus === "in_progress") {
         void runReindex(currentOrgId, generation);

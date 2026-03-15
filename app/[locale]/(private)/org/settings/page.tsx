@@ -31,9 +31,20 @@ export default function OrgSettingsPage() {
     data: modelConfig,
     loading: modelLoading,
     error: modelError,
+    refetch: refetchModelConfig,
     update: updateModelConfig,
   } = useOrgModelConfig(currentOrgId);
   const { isReindexing, total: reindexTotal, done: reindexDone } = useReindex();
+
+  // Refetch model config when reindex finishes so reindexStatus updates from 'in_progress' to 'idle'
+  useEffect(() => {
+    if (!currentOrgId) return;
+    const handler = (e: CustomEvent<{ orgId: string }>) => {
+      if (e.detail?.orgId === currentOrgId) void refetchModelConfig();
+    };
+    window.addEventListener("reindex-finished", handler as EventListener);
+    return () => window.removeEventListener("reindex-finished", handler as EventListener);
+  }, [currentOrgId, refetchModelConfig]);
   const {
     data: providerSecrets,
     loading: providerSecretsLoading,
@@ -62,8 +73,20 @@ export default function OrgSettingsPage() {
     { provider: string; name: string; isLocal: boolean }[]
   >([]);
   const [availableEmbeddingModels, setAvailableEmbeddingModels] = useState<
-    { provider: string; name: string; dimension: number; isLocal: boolean; isAvailable: boolean; bestFor?: string | null }[]
+    {
+      provider: string;
+      name: string;
+      dimension: number;
+      dimensionConfigurable: boolean;
+      allowedDimensions?: number[];
+      isLocal: boolean;
+      isAvailable: boolean;
+      bestFor?: string | null;
+    }[]
   >([]);
+  const [embeddingDimensionSelection, setEmbeddingDimensionSelection] = useState<
+    number | null
+  >(null);
   const [openaiKeyInput, setOpenaiKeyInput] = useState("");
   const [anthropicKeyInput, setAnthropicKeyInput] = useState("");
   const [googleKeyInput, setGoogleKeyInput] = useState("");
@@ -81,6 +104,9 @@ export default function OrgSettingsPage() {
     setChatModel(modelConfig.chatModel ?? "");
     setEmbeddingProvider(modelConfig.embeddingProvider || "local");
     setEmbeddingModel(modelConfig.embeddingModel || "");
+    const dim =
+      modelConfig.embeddingDimension ?? modelConfig.embeddingDimensionDefault;
+    setEmbeddingDimensionSelection(dim > 0 ? dim : null);
   }, [modelConfig]);
 
   useEffect(() => {
@@ -122,6 +148,8 @@ export default function OrgSettingsPage() {
                 provider: string;
                 name: string;
                 dimension: number;
+                dimensionConfigurable?: boolean;
+                allowedDimensions?: number[];
                 isLocal: boolean;
                 isAvailable: boolean;
                 bestFor?: string | null;
@@ -134,7 +162,12 @@ export default function OrgSettingsPage() {
             }
           | null;
         if (!payload || cancelled) return;
-        setAvailableEmbeddingModels(payload.embeddingModels ?? []);
+        setAvailableEmbeddingModels(
+          (payload.embeddingModels ?? []).map((m) => ({
+            ...m,
+            dimensionConfigurable: m.dimensionConfigurable ?? false,
+          })),
+        );
         setAvailableChatModels(payload.chatModels ?? []);
       } catch {
         // Ignore model loading failures; UI will fall back to existing config values.
@@ -247,11 +280,23 @@ export default function OrgSettingsPage() {
     }
     setSavingModelConfig(true);
     try {
+      const defaultDim = modelConfig?.embeddingDimensionDefault ?? 0;
+      const effectiveSelection =
+        embeddingDimensionSelection ?? defaultDim;
+      const embeddingDimension =
+        modelConfig?.embeddingDimensionConfigurable
+          ? effectiveSelection === defaultDim
+            ? null
+            : effectiveSelection
+          : undefined;
       const updated = await updateModelConfig({
         chatProvider: chatProvider.trim(),
         chatModel: chatModel.trim() ? chatModel.trim() : null,
         embeddingProvider: embeddingProvider.trim(),
         embeddingModel: embeddingModel.trim(),
+        ...(modelConfig?.embeddingDimensionConfigurable
+          ? { embeddingDimension }
+          : {}),
       });
       message.success(t("modelConfigUpdated"));
       if (updated?.reindexStatus === "in_progress") {
@@ -284,9 +329,11 @@ export default function OrgSettingsPage() {
     chatModel,
     chatProvider,
     currentOrgId,
+    embeddingDimensionSelection,
     embeddingModel,
     embeddingProvider,
     message,
+    modelConfig?.embeddingDimensionConfigurable,
     t,
     updateModelConfig,
   ]);
@@ -580,6 +627,62 @@ export default function OrgSettingsPage() {
                     {t("embeddingModelHelp")}
                   </p>
                 </div>
+                {embeddingModel && (
+                  <div>
+                    <label style={{ display: "block", marginBottom: 4 }}>
+                      {t("embeddingDimension")}
+                    </label>
+                    {modelConfig.embeddingDimensionConfigurable ? (
+                      <>
+                        <Select
+                          style={{ width: 160 }}
+                          value={
+                            (embeddingDimensionSelection ??
+                              modelConfig.embeddingDimensionDefault) ||
+                            null
+                          }
+                          disabled={!canManage}
+                          onChange={(v) =>
+                            setEmbeddingDimensionSelection(
+                              v != null ? (v as number) : null,
+                            )
+                          }
+                          options={[
+                            ...new Set([
+                              ...(modelConfig.embeddingDimensionAllowed?.length
+                                ? modelConfig.embeddingDimensionAllowed
+                                : [256, 384, 512, 768, 1024, 1536, 2048, 3072]),
+                              modelConfig.embeddingDimensionDefault,
+                            ].filter((d) => typeof d === "number" && d > 0)),
+                          ]
+                            .sort((a, b) => a - b)
+                            .map((d) => ({ label: `${d}`, value: d }))}
+                        />
+                        <p
+                          style={{
+                            marginTop: 4,
+                            fontSize: 14,
+                            color: "var(--color-text-muted)",
+                          }}
+                        >
+                          {t("embeddingDimensionHelp")}
+                        </p>
+                      </>
+                    ) : (
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: 14,
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        {t("embeddingDimensionFixed", {
+                          dimension: modelConfig.embeddingDimensionDefault,
+                        })}
+                      </p>
+                    )}
+                  </div>
+                )}
                 <div style={{ fontSize: 14, color: "var(--color-text-muted)" }}>
                   <p style={{ margin: 0 }}>
                     {t("embeddingVersion", {
