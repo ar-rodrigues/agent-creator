@@ -1,0 +1,41 @@
+.profileContainer {
+  width: 100%;
+  max-width: none;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-2xl);
+  font-weight: var(--font-semibold);
+  color: var(--color-text);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--font-medium);
+  color: var(--color-text);
+}
+
+.emailValue {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--color-text-muted);
+}
+
+.formsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-6);
+}
+
+@media (min-width: 48rem) {
+  .formsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.form {
+  width: 100%;
+  max-width: 100%;
+}

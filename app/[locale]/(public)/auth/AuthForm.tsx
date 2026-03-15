@@ -12,6 +12,38 @@ import { Card } from "@/components/ui/Card";
 import { Link } from "@/i18n/navigation";
 import styles from "./AuthForm.module.css";
 
+function getAuthBaseUrl(): string {
+  if (typeof window !== "undefined") {
+    return (
+      process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? window.location.origin
+    );
+  }
+  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+}
+
+const AUTH_ERROR_KEYS: Record<string, string> = {
+  "email rate limit exceeded": "errorEmailRateLimitExceeded",
+  "invalid login credentials": "errorInvalidCredentials",
+  "missing_code": "errorMissingCode",
+};
+
+function getTranslatedAuthError(
+  rawError: string | null,
+  t: (key: string) => string
+): string | null {
+  if (!rawError) return null;
+  const normalized = rawError.trim().toLowerCase();
+  const key = AUTH_ERROR_KEYS[normalized];
+  if (key) {
+    try {
+      return t(key);
+    } catch {
+      return rawError;
+    }
+  }
+  return rawError;
+}
+
 type TabKey = "signin" | "signup" | "forgot";
 
 export function AuthForm() {
@@ -31,7 +63,8 @@ export function AuthForm() {
   const [forgotSent, setForgotSent] = useState(false);
 
   const urlError = searchParams.get("error");
-  const displayError = urlError ? decodeURIComponent(urlError) : authError;
+  const rawError = urlError ? decodeURIComponent(urlError) : authError;
+  const displayError = getTranslatedAuthError(rawError, t) ?? rawError;
 
   const handleSignIn = async (values: { email: string; password: string }) => {
     setSubmitting(true);
@@ -46,11 +79,11 @@ export function AuthForm() {
 
   const handleSignUp = async (values: { email: string; password: string }) => {
     setSubmitting(true);
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const baseUrl = getAuthBaseUrl();
     const { error, needsConfirmation } = await signUp(
       values.email,
       values.password,
-      { emailRedirectTo: `${origin}/auth/callback` }
+      { emailRedirectTo: `${baseUrl}/auth/callback` }
     );
     setSubmitting(false);
     if (!error) {
@@ -66,10 +99,10 @@ export function AuthForm() {
   const handleForgotPassword = async (values: { email: string }) => {
     setSubmitting(true);
     setForgotSent(false);
-    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const baseUrl = getAuthBaseUrl();
     const { error } = await resetPassword(
       values.email,
-      `${origin}/auth/callback`
+      `${baseUrl}/auth/callback?next=${encodeURIComponent("/auth/reset-password")}`
     );
     setSubmitting(false);
     if (!error) {
@@ -242,7 +275,12 @@ export function AuthForm() {
           <Stack gap="4">
             <h1 className={styles.title}>{t(titleKey)}</h1>
             {displayError && (
-              <Alert type="error" title={displayError} showIcon closable />
+              <Alert
+                type="error"
+                title={displayError}
+                showIcon
+                closable
+              />
             )}
             <Tabs
               activeKey={activeTab}

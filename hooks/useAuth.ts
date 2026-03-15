@@ -18,6 +18,8 @@ export interface UseAuthReturn {
   ) => Promise<{error: AuthError; needsConfirmation?: boolean}>;
   signOut: () => Promise<void>;
   resetPassword: (email: string, redirectTo?: string) => Promise<{error: AuthError}>;
+  updatePassword: (newPassword: string) => Promise<{error: AuthError}>;
+  updateEmail: (newEmail: string) => Promise<{error: AuthError}>;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -95,6 +97,32 @@ export function useAuth(): UseAuthReturn {
     [client.auth],
   );
 
+  const updatePassword = useCallback(
+    async (newPassword: string): Promise<{error: AuthError}> => {
+      setError(null);
+      const {error: updateError} = await client.auth.updateUser({
+        password: newPassword,
+      });
+      const err = updateError?.message ?? null;
+      setError(err);
+      return {error: err};
+    },
+    [client.auth],
+  );
+
+  const updateEmail = useCallback(
+    async (newEmail: string): Promise<{error: AuthError}> => {
+      setError(null);
+      const {error: updateError} = await client.auth.updateUser({
+        email: newEmail,
+      });
+      const err = updateError?.message ?? null;
+      setError(err);
+      return {error: err};
+    },
+    [client.auth],
+  );
+
   return {
     user,
     loading,
@@ -103,5 +131,7 @@ export function useAuth(): UseAuthReturn {
     signUp,
     signOut,
     resetPassword,
+    updatePassword,
+    updateEmail,
   };
 }

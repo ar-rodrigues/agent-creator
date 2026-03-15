@@ -43,6 +43,9 @@ export default async function PrivateLayout({ children, params }: Props) {
               <Link href="/dashboard" className={styles.navLink}>
                 {t("dashboard")}
               </Link>
+              <Link href="/profile" className={styles.navLink}>
+                {t("profile")}
+              </Link>
               {hasOrgs ? (
                 <>
                   <Link href="/dashboard/knowledge" className={styles.navLink}>
