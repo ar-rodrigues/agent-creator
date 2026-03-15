@@ -1,4 +1,43 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+/**
+ * In-house concurrency limiter (no Node built-ins) so Next.js/Turbopack can bundle.
+ * Runs at most `concurrency` async tasks at a time; same API as p-limit's limit(fn).
+ */
+function createConcurrencyLimit(concurrency: number) {
+  let active = 0;
+  const queue: Array<() => void> = [];
+
+  const runNext = () => {
+    if (active < concurrency && queue.length > 0) {
+      const next = queue.shift()!;
+      next();
+    }
+  };
+
+  return function limit<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const run = async () => {
+        active++;
+        try {
+          const result = await fn();
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        } finally {
+          active--;
+          runNext();
+        }
+      };
+
+      if (active < concurrency) {
+        run();
+      } else {
+        queue.push(run);
+      }
+    });
+  };
+}
 import { getOrgModelConfig } from "@/lib/llm/orgConfig";
 import { getGoogleApiKey } from "@/lib/llm/getGoogleApiKey";
 
@@ -170,14 +209,103 @@ type GeminiBatchEmbedResponse = {
 /** Google API model id for display name "Gemini Embedding 2". */
 const GEMINI_EMBEDDING_2_API_MODEL = "text-embedding-005";
 
-const EMBED_API_BATCH_SIZE = 20;
+const EMBED_API_BATCH_SIZE_LOW = 20;
+const EMBED_API_BATCH_SIZE_HIGH = 50;
 const EMBEDDING_RPC_BATCH_SIZE = 100;
+const DEFAULT_LOCAL_CONCURRENCY = 6;
+const MAX_EMBED_RETRIES = 3;
+const RETRY_BASE_MS = 2000;
 const EMBEDDING_RPC_MIN_SPLIT_SIZE = 10;
 const REINDEX_INSERT_BATCH_SIZE = 100;
 const REINDEX_INSERT_MIN_SPLIT_SIZE = 10;
 const MISSING_RPC_CODES = new Set(["PGRST202", "42883"]);
 
 let warnedMissingEmbeddingRpc = false;
+
+function isRateLimitError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const m = err.message.toLowerCase();
+  return (
+    m.includes("429") ||
+    m.includes("rate limit") ||
+    m.includes("resource exhausted") ||
+    m.includes("quota exceeded") ||
+    m.includes("too many requests")
+  );
+}
+
+/**
+ * Runs embedFn and retries on 429/rate-limit with exponential backoff.
+ */
+async function embedWithRetry<T>(embedFn: () => Promise<T>): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= MAX_EMBED_RETRIES; attempt++) {
+    try {
+      return await embedFn();
+    } catch (err) {
+      lastErr = err;
+      if (!isRateLimitError(err) || attempt === MAX_EMBED_RETRIES) throw err;
+      const delayMs = Math.min(
+        RETRY_BASE_MS * Math.pow(2, attempt),
+        10000,
+      );
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
+type TierProbeArgs = {
+  orgId: string;
+  isGemini: boolean;
+  embeddingModel: string;
+  probeTexts: string[];
+};
+
+/**
+ * Probes embed API with 1, then 2, then 4 concurrent requests. Returns the safe
+ * concurrency limit (1, 2, 4, or 6) for this upload only; nothing is persisted.
+ */
+async function runTierProbe(args: TierProbeArgs): Promise<number> {
+  const { orgId, isGemini, embeddingModel, probeTexts } = args;
+  const apiKey = isGemini ? await getGoogleApiKey(orgId) : null;
+  if (isGemini && !apiKey) return 1;
+
+  const doOneEmbed = async (): Promise<number[][]> => {
+    if (isGemini && apiKey) {
+      return embedWithGoogle(apiKey, embeddingModel, probeTexts);
+    }
+    return embedWithOllama(embeddingModel, probeTexts);
+  };
+
+  try {
+    await doOneEmbed();
+  } catch (e) {
+    if (isRateLimitError(e)) return 1;
+    throw e;
+  }
+
+  try {
+    await Promise.all([doOneEmbed(), doOneEmbed()]);
+  } catch (e) {
+    if (isRateLimitError(e)) return 2;
+    throw e;
+  }
+
+  try {
+    await Promise.all([
+      doOneEmbed(),
+      doOneEmbed(),
+      doOneEmbed(),
+      doOneEmbed(),
+    ]);
+  } catch (e) {
+    if (isRateLimitError(e)) return 4;
+    throw e;
+  }
+
+  return 6;
+}
 
 function shouldFallbackToLegacyRpcUpdate(error: { code?: string; message?: string }): boolean {
   if (error.code != null && MISSING_RPC_CODES.has(error.code)) {
@@ -439,19 +567,54 @@ export async function embedChunksForDocument(
   // default for the smallest observed working size with local Ollama models.
   const effectiveContextLength = contextLength ?? 150;
 
+  // Resolve concurrency: local (Ollama) uses high default; cloud runs tier probe every time.
+  let concurrency: number;
+  if (isOllama) {
+    concurrency = DEFAULT_LOCAL_CONCURRENCY;
+  } else {
+    const probeTexts = chunks
+      .slice(0, 5)
+      .map((c) => truncateToContextLength(c.content, effectiveContextLength));
+    if (probeTexts.length === 0) {
+      concurrency = 1;
+    } else {
+      concurrency = await runTierProbe({
+        orgId,
+        isGemini,
+        embeddingModel: orgConfig.embeddingModel,
+        probeTexts,
+      });
+    }
+  }
+
+  const effectiveBatchSize =
+    concurrency >= 4 || isOllama
+      ? EMBED_API_BATCH_SIZE_HIGH
+      : EMBED_API_BATCH_SIZE_LOW;
+
+  const geminiApiKey = isGemini ? await getGoogleApiKey(orgId) : null;
+
+  const limit = createConcurrencyLimit(concurrency);
+
+  type BatchResult = {
+    embedApiMs: number;
+    dbRpcMs: number;
+    updated: number;
+    failed: number;
+    rpcCalls: number;
+  };
+
   const tEmbedStart = Date.now();
-  let totalEmbedApiMs = 0;
-  let totalDbRpcMs = 0;
-  let totalDbUpdated = 0;
-  let totalDbFailed = 0;
-  let totalRpcCalls = 0;
-  let batchCount = 0;
+  const batchStarts: number[] = [];
+  for (let i = 0; i < chunks.length; i += effectiveBatchSize) {
+    batchStarts.push(i);
+  }
 
-  // Send all chunks in one batch per BATCH_SIZE to stay within Ollama's
-  // per-request limits while still getting a single round-trip per batch.
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += EMBED_API_BATCH_SIZE) {
-    const batch = chunks.slice(batchStart, batchStart + EMBED_API_BATCH_SIZE);
-
+  const runOneBatch = async (batchStart: number): Promise<BatchResult> => {
+    const batch = chunks.slice(
+      batchStart,
+      batchStart + effectiveBatchSize,
+    );
     const texts = batch.map((c) =>
       truncateToContextLength(c.content, effectiveContextLength),
     );
@@ -459,27 +622,36 @@ export async function embedChunksForDocument(
     const tApiStart = Date.now();
     let vectors: number[][];
     try {
-      if (isGemini) {
-        const apiKey = await getGoogleApiKey(orgId);
-        if (!apiKey) continue;
-        vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, texts);
-      } else {
-        vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
-      }
+      vectors = await embedWithRetry(async () => {
+        if (isGemini && geminiApiKey) {
+          return embedWithGoogle(
+            geminiApiKey,
+            orgConfig.embeddingModel,
+            texts,
+          );
+        }
+        return embedWithOllama(orgConfig.embeddingModel, texts);
+      });
     } catch (err) {
       console.warn(
         `embedChunksForDocument: embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
         err instanceof Error ? err.message : err,
       );
-      continue;
+      return {
+        embedApiMs: Date.now() - tApiStart,
+        dbRpcMs: 0,
+        updated: 0,
+        failed: 0,
+        rpcCalls: 0,
+      };
     }
-    totalEmbedApiMs += Date.now() - tApiStart;
+    const embedApiMs = Date.now() - tApiStart;
 
     if (dimension != null && vectors[0]?.length !== dimension) {
       console.warn(
         `embedChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, registry says ${dimension}. Skipping batch.`,
       );
-      continue;
+      return { embedApiMs, dbRpcMs: 0, updated: 0, failed: 0, rpcCalls: 0 };
     }
 
     const rowsToUpdate: ChunkEmbeddingUpdate[] = [];
@@ -499,7 +671,6 @@ export async function embedChunksForDocument(
     let batchUpdated = 0;
     let batchFailed = 0;
     let batchRpcCalls = 0;
-
     for (
       let updateStart = 0;
       updateStart < rowsToUpdate.length;
@@ -509,28 +680,42 @@ export async function embedChunksForDocument(
         updateStart,
         updateStart + EMBEDDING_RPC_BATCH_SIZE,
       );
-      const result = await updateEmbeddingsViaRpcWithFallback(supabase, updateBatch);
+      const result = await updateEmbeddingsViaRpcWithFallback(
+        supabase,
+        updateBatch,
+      );
       batchUpdated += result.updated;
       batchFailed += result.failed;
       batchRpcCalls += result.rpcCalls;
     }
-
-    totalDbRpcMs += Date.now() - tDbStart;
-    totalDbUpdated += batchUpdated;
-    totalDbFailed += batchFailed;
-    totalRpcCalls += batchRpcCalls;
-    batchCount++;
+    const dbRpcMs = Date.now() - tDbStart;
 
     if (batchFailed > 0) {
       console.warn(
         `embedChunksForDocument: ${batchFailed}/${rowsToUpdate.length} RPC updates failed in batch ${batchStart}–${batchStart + batch.length - 1}`,
       );
     }
-  }
+    return {
+      embedApiMs,
+      dbRpcMs,
+      updated: batchUpdated,
+      failed: batchFailed,
+      rpcCalls: batchRpcCalls,
+    };
+  };
 
+  const results = await Promise.all(
+    batchStarts.map((batchStart) => limit(() => runOneBatch(batchStart))),
+  );
+
+  const totalEmbedApiMs = results.reduce((s, r) => s + r.embedApiMs, 0);
+  const totalDbRpcMs = results.reduce((s, r) => s + r.dbRpcMs, 0);
+  const totalDbUpdated = results.reduce((s, r) => s + r.updated, 0);
+  const totalDbFailed = results.reduce((s, r) => s + r.failed, 0);
+  const totalRpcCalls = results.reduce((s, r) => s + r.rpcCalls, 0);
   const totalMs = Date.now() - tEmbedStart;
   console.log(
-    `[upload:embedding] documentId=${documentId} totalMs=${totalMs} batchCount=${batchCount} embedApiMs=${totalEmbedApiMs} dbRpcMs=${totalDbRpcMs} rpcCalls=${totalRpcCalls} dbUpdated=${totalDbUpdated} dbFailed=${totalDbFailed} chunkCount=${chunks.length}`,
+    `[upload:embedding] documentId=${documentId} totalMs=${totalMs} batchCount=${results.length} embedApiMs=${totalEmbedApiMs} dbRpcMs=${totalDbRpcMs} rpcCalls=${totalRpcCalls} dbUpdated=${totalDbUpdated} dbFailed=${totalDbFailed} chunkCount=${chunks.length}`,
   );
 }
 
@@ -597,43 +782,83 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
 
   const effectiveContextLength = contextLength ?? 512;
 
+  // Same concurrency resolution as embedChunksForDocument: Ollama fixed, cloud probe every time.
+  let concurrency: number;
+  if (isOllama) {
+    concurrency = DEFAULT_LOCAL_CONCURRENCY;
+  } else {
+    const probeTexts = chunks
+      .slice(0, 5)
+      .map((c) => truncateToContextLength(c.content, effectiveContextLength));
+    if (probeTexts.length === 0) {
+      concurrency = 1;
+    } else {
+      concurrency = await runTierProbe({
+        orgId,
+        isGemini,
+        embeddingModel: orgConfig.embeddingModel,
+        probeTexts,
+      });
+    }
+  }
+
+  const effectiveBatchSize =
+    concurrency >= 4 || isOllama
+      ? EMBED_API_BATCH_SIZE_HIGH
+      : EMBED_API_BATCH_SIZE_LOW;
+
+  const geminiApiKey = isGemini ? await getGoogleApiKey(orgId) : null;
+  const limit = createConcurrencyLimit(concurrency);
+
+  const batchStarts: number[] = [];
+  for (let i = 0; i < chunks.length; i += effectiveBatchSize) {
+    batchStarts.push(i);
+  }
+
   let totalInsertMs = 0;
   let totalInserted = 0;
   let totalInsertFailed = 0;
   let totalInsertCalls = 0;
-  const pendingInserts: ReindexedChunkInsert[] = [];
 
-  for (let batchStart = 0; batchStart < chunks.length; batchStart += EMBED_API_BATCH_SIZE) {
-    const batch = chunks.slice(batchStart, batchStart + EMBED_API_BATCH_SIZE);
+  const runOneReindexBatch = async (
+    batchStart: number,
+  ): Promise<ReindexedChunkInsert[]> => {
+    const batch = chunks.slice(
+      batchStart,
+      batchStart + effectiveBatchSize,
+    );
     const texts = batch.map((c) =>
       truncateToContextLength(c.content, effectiveContextLength),
     );
 
     let vectors: number[][];
     try {
-      if (isGemini) {
-        const apiKey = await getGoogleApiKey(orgId);
-        if (!apiKey) continue;
-        vectors = await embedWithGoogle(apiKey, orgConfig.embeddingModel, texts);
-      } else {
-        vectors = await embedWithOllama(orgConfig.embeddingModel, texts);
-      }
+      vectors = await embedWithRetry(async () => {
+        if (isGemini && geminiApiKey) {
+          return embedWithGoogle(
+            geminiApiKey,
+            orgConfig.embeddingModel,
+            texts,
+          );
+        }
+        return embedWithOllama(orgConfig.embeddingModel, texts);
+      });
     } catch (err) {
       console.warn(
         `reindexChunksForDocument: embed failed for batch ${batchStart}–${batchStart + batch.length - 1}`,
         err instanceof Error ? err.message : err,
       );
-      continue;
+      return [];
     }
 
     if (dimension != null && vectors[0]?.length !== dimension) {
       console.warn(
         `reindexChunksForDocument: embedding dimension mismatch — got ${vectors[0]?.length}, registry says ${dimension}. Skipping batch.`,
       );
-      continue;
+      return [];
     }
 
-    const newRows = batch
+    return batch
       .map((chunk, i) => {
         const embedding = vectors[i];
         if (!embedding) return null;
@@ -649,24 +874,26 @@ export async function reindexChunksForDocument(args: ReindexChunksArgs): Promise
         };
       })
       .filter((row): row is ReindexedChunkInsert => row != null);
+  };
 
-    if (newRows.length === 0) continue;
-    pendingInserts.push(...newRows);
+  const allNewRows: ReindexedChunkInsert[][] = await Promise.all(
+    batchStarts.map((batchStart) =>
+      limit(() => runOneReindexBatch(batchStart)),
+    ),
+  );
 
-    while (pendingInserts.length >= REINDEX_INSERT_BATCH_SIZE) {
-      const insertBatch = pendingInserts.splice(0, REINDEX_INSERT_BATCH_SIZE);
-      const tInsertStart = Date.now();
-      const insertResult = await insertReindexedRowsWithFallback(supabase, insertBatch);
-      totalInsertMs += Date.now() - tInsertStart;
-      totalInserted += insertResult.inserted;
-      totalInsertFailed += insertResult.failed;
-      totalInsertCalls += insertResult.calls;
-    }
-  }
+  const pendingInserts: ReindexedChunkInsert[] = allNewRows.flat();
 
-  if (pendingInserts.length > 0) {
+  for (let i = 0; i < pendingInserts.length; i += REINDEX_INSERT_BATCH_SIZE) {
+    const insertBatch = pendingInserts.slice(
+      i,
+      i + REINDEX_INSERT_BATCH_SIZE,
+    );
     const tInsertStart = Date.now();
-    const insertResult = await insertReindexedRowsWithFallback(supabase, pendingInserts);
+    const insertResult = await insertReindexedRowsWithFallback(
+      supabase,
+      insertBatch,
+    );
     totalInsertMs += Date.now() - tInsertStart;
     totalInserted += insertResult.inserted;
     totalInsertFailed += insertResult.failed;
