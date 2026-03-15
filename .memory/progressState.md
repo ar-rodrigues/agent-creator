@@ -37,6 +37,45 @@ The project has:
 - **Earlier work (still current)**
   - Memory Bank & vision alignment; app shell; orgs, seats & permissions (migrations, RLS, storage, APIs); org-level model config & soft RAG migration; RAG general QA and provider secrets; document upload with embedding support.
 
+### Recently Completed (2026-03-15) — Module-first architecture
+
+- **DB foundation** (`20260315200000_module_catalog_and_org_states.sql`):
+  - `public.system_user_roles` — system-level role assignments (reuses `public.roles`).
+  - `public.module_catalog` — registry of modules (KEY, is_core, default_enabled_for_new_orgs).
+  - `public.org_module_states` — per-org enabled/disabled with audit columns (updated_by, updated_reason, source).
+  - `public.is_system_admin()` helper function.
+  - RLS: org members read their own module states; system admins manage all.
+  - Backfill: all existing orgs enabled for all modules.
+  - `handle_organization_created` trigger extended to provision module states on new org creation.
+  - Seeds: KNOWLEDGE (core, enabled for new), SKILLS (off), CREWS (off).
+
+- **Server access layer** (`lib/modules/`):
+  - `lib/modules/constants.ts` — `MODULE_KEYS`, `ModuleKey`, `ModuleToggleSource`.
+  - `lib/modules/server.ts` — `getOrgModuleStates`, `isModuleEnabledForOrg`, `isSystemAdmin`, `assertSystemAdmin`, `verifyModuleAccess`.
+
+- **APIs**:
+  - `GET/PATCH /api/orgs/[orgId]/modules` — org members read; system admins toggle.
+  - `GET/PATCH /api/system/modules` — system-admin cross-org bulk view and toggle.
+  - `GET /api/system/admin-check` — returns whether current user is a system admin.
+
+- **Client hook** (`hooks/useOrgModules.ts`) — `{ data, loading, error, refetch, isEnabled }`.
+- **useSystemAdmin** hook (`hooks/useSystemAdmin.ts`) — checks system admin status client-side.
+
+- **UI gating**:
+  - `modules/shared/ModuleGuard.tsx` — client wrapper showing disabled state when module off.
+  - Private sidebar now shows module-specific links only when enabled; "System admin" link visible to system admins only.
+  - System admin modules management page at `/system/modules` with per-org toggle switches.
+
+- **Module folder scaffolding**:
+  - `modules/skills/` and `modules/crews/` created with `api/`, `components/`, `hooks/`, `types/`, `constants.ts`, `index.ts`.
+  - Placeholder pages `dashboard/skills` and `dashboard/crews` with module access guards.
+
+- **Translations**: `modules.*` and `systemAdmin.*` namespaces added to both `en.json` and `es.json`.
+- **`.cursorrules`** updated with module-first placement, gating, and hook contract rules.
+
+- **Module page gating fix (2026-03):** Crews and Skills dashboard pages now **always** run `verifyModuleAccess` using the active org (first org by `created_at`). Direct URL access to `/dashboard/crews` or `/dashboard/skills` when the module is disabled for that org now redirects to dashboard instead of rendering.
+- **Developer manual:** `modules/DEVELOPER_MANUAL.md` added with the process for creating new modules, how the database links to the code, and a checklist. Memory Bank and `.cursorrules` updated to reference it.
+
 ### Next
 
 > These are high‑level next steps; refine them into concrete tickets as you go.

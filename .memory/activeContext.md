@@ -2,14 +2,23 @@
 
 ### Current Task
 
-**Phase 1 – Knowledge & org settings are implemented.** Recent work (see last 10+ commits) added: Knowledge page (streaming QA chat, context token usage, localized summaries, reindex status); Org settings (embedding dimension config, reindex flow, provider secrets, model config); embeddings concurrency/retry; layout i18n. **Next focus:** Extend RAG retrieval to full similarity search; optionally add a documents/knowledge space detail view for indexing status. Skills layer (Phase 2) and agents/crews (Phase 3) follow.
+**Module-first architecture has been implemented.** The project now has system-managed per-org module toggles, module scaffolding for Skills and Crews, and a system-admin UI to manage module states. **Next focus:** Extend RAG retrieval to full similarity search (top-k, org + knowledge spaces + version-aware); then build out the Skills registry (Phase 2) by adding skills CRUD APIs and UI under `modules/skills/`.
 
 ### Focus / Notes
 
-- **Knowledge page** (`app/[locale]/(private)/dashboard/knowledge/`): Main page + `_components/ChatMessage.tsx`, `KnowledgeOverview.tsx`, `SourceBadge.tsx`. Uses `useRagGeneral` (ask + askStreaming), `useKnowledgeSpaces`, `useGeneralDocuments`; token estimation via `lib/utils/tokens.ts` (`estimateTokens`, `CONTEXT_WINDOW_MAX_TOKENS`). Summary refresh: `POST /api/knowledge-spaces/[spaceId]/summary` with concurrency guard per space/locale.
-- **Org settings** (`app/[locale]/(private)/org/settings/page.tsx`): Model config (chat + embedding), embedding dimension selector when model supports it, provider secrets (OpenAI/Anthropic/Google), reindex status. Hooks: `useOrgModelConfig`, `useOrgProviderSecrets`, `useReindex` from `ReindexContext`.
-- **Reindex flow**: `contexts/ReindexContext.tsx`; APIs: `reindex-pending`, `documents/[id]/reembed`, `reindex-complete`; `reindex-finished` event refreshes model config.
-- **Memory Bank:** projectBrief, productContext, progressState, and this file are up to date with knowledge + org settings as of 2025-03-15. Update progressState when shipping features; update activeContext when shifting focus; keep productContext/projectBrief aligned with product/architecture decisions.
+- **Module system** (just shipped):
+  - DB: `system_user_roles`, `module_catalog`, `org_module_states` with RLS.
+  - Server: `lib/modules/server.ts` (`verifyModuleAccess`, `assertSystemAdmin`, `isModuleEnabledForOrg`).
+  - APIs: `/api/orgs/[orgId]/modules`, `/api/system/modules`, `/api/system/admin-check`.
+  - UI: `modules/shared/ModuleGuard.tsx`, module-aware sidebar nav, `/system/modules` management page.
+  - Modules: `modules/skills/` and `modules/crews/` scaffolded with types, constants, barrels.
+  - To make a user a system admin: insert a row into `system_user_roles` with the user's id and the `admin` role_id from `public.roles`.
+  - **When adding new modules:** consult **`modules/DEVELOPER_MANUAL.md`** (process, DB ↔ code link, checklist). Dashboard pages must always gate with `verifyModuleAccess` using the active org so direct URL access is blocked when the module is off.
+  - **Exhaustive checks:** When branching on `ModuleKey`, use a `switch` with `default: const _exhaustive: never = moduleKey` so new modules cause a compile-time error until branches are updated (see .cursorrules and DEVELOPER_MANUAL).
+
+- **Knowledge page** (`app/[locale]/(private)/dashboard/knowledge/`): streaming QA, context token usage, localized summaries, reindex status.
+- **Org settings** (`app/[locale]/(private)/org/settings/page.tsx`): model config, embedding dimension, provider secrets, reindex flow.
+- **Memory Bank:** updated with module architecture on 2026-03-15. Update progressState when shipping features; update activeContext when shifting focus.
 
 ## Active Context – Agent Creator
 

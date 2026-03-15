@@ -7,6 +7,8 @@ import { OrgSelector } from "@/components/org/OrgSelector";
 import { ReindexProvider } from "@/contexts/ReindexContext";
 import { Link } from "@/i18n/navigation";
 import { routing } from "@/i18n/routing";
+import { getOrgModuleStates, isSystemAdmin } from "@/lib/modules/server";
+import { MODULE_KEYS } from "@/lib/modules/constants";
 import styles from "./layout.module.css";
 
 type Props = {
@@ -31,6 +33,18 @@ export default async function PrivateLayout({ children, params }: Props) {
     .select("id")
     .order("created_at", { ascending: true });
   const hasOrgs = Array.isArray(orgs) && orgs.length > 0;
+
+  // Load module states for the first (active) org and system admin status in parallel.
+  const activeOrgId = hasOrgs ? orgs![0].id : null;
+  const [moduleStates, systemAdmin] = await Promise.all([
+    activeOrgId ? getOrgModuleStates(activeOrgId) : Promise.resolve({}),
+    isSystemAdmin(user!.id),
+  ]);
+
+  const isKnowledgeEnabled = moduleStates[MODULE_KEYS.KNOWLEDGE]?.enabled !== false;
+  const isSkillsEnabled = moduleStates[MODULE_KEYS.SKILLS]?.enabled === true;
+  const isCrewsEnabled = moduleStates[MODULE_KEYS.CREWS]?.enabled === true;
+
   const t = await getTranslations("common");
 
   return (
@@ -48,14 +62,31 @@ export default async function PrivateLayout({ children, params }: Props) {
               </Link>
               {hasOrgs ? (
                 <>
-                  <Link href="/dashboard/knowledge" className={styles.navLink}>
-                    {t("knowledge")}
-                  </Link>
+                  {isKnowledgeEnabled && (
+                    <Link href="/dashboard/knowledge" className={styles.navLink}>
+                      {t("knowledge")}
+                    </Link>
+                  )}
+                  {isSkillsEnabled && (
+                    <Link href="/dashboard/skills" className={styles.navLink}>
+                      {t("skills")}
+                    </Link>
+                  )}
+                  {isCrewsEnabled && (
+                    <Link href="/dashboard/crews" className={styles.navLink}>
+                      {t("crews")}
+                    </Link>
+                  )}
                   <Link href="/org/settings" className={styles.navLink}>
                     {t("orgSettings")}
                   </Link>
                 </>
               ) : null}
+              {systemAdmin && (
+                <Link href="/system/modules" className={styles.navLink}>
+                  {t("systemAdmin")}
+                </Link>
+              )}
             </nav>
             <div className={styles.sidebarFooter}>
               <OrgSelector />

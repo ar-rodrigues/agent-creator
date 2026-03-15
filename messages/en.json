@@ -4,7 +4,10 @@
     "dashboard": "Dashboard",
     "profile": "Profile",
     "knowledge": "Knowledge",
+    "skills": "Skills",
+    "crews": "Crews",
     "orgSettings": "Org settings",
+    "systemAdmin": "System admin",
     "signOut": "Sign out",
     "home": "Home",
     "copyright": "© {year} Agent Creator",
@@ -151,6 +154,28 @@
     "emailUpdateSent": "Check your email to confirm the new address.",
     "emailUpdated": "Email updated",
     "emailUpdateFailed": "Failed to update email"
+  },
+  "modules": {
+    "disabled": "This module is not enabled for your organization.",
+    "disabledContactAdmin": "Contact your system administrator to enable this feature."
+  },
+  "systemAdmin": {
+    "title": "System admin",
+    "modulesTitle": "Module management",
+    "loading": "Loading…",
+    "noModules": "No modules found.",
+    "organization": "Organization",
+    "moduleKey": "Module",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "source": "Source",
+    "updatedAt": "Last updated",
+    "toggleSuccess": "Module state updated",
+    "toggleFailed": "Failed to update module state",
+    "filterByOrg": "Filter by organization",
+    "filterByModule": "Filter by module",
+    "allOrgs": "All organizations",
+    "allModules": "All modules"
   },
   "orgSettings": {
     "title": "Organization settings",

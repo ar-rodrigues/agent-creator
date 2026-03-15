@@ -42,6 +42,27 @@ The long‑term goal is that a user can upload files, define reusable skills, co
   - Keep the system **LLM‑provider‑agnostic**, with an abstraction that can swap local vs. cloud models.
   - Make the project **agent‑friendly** (clear Memory Bank, clear plans) so AI coding agents can work in this repo reliably.
 
+### Module-First Architecture
+
+The project is **module-first**: all product features (Knowledge, Skills, Crews, etc.) are implemented as self-contained modules under `modules/<module>/` and can be independently enabled or disabled per organization.
+
+- **Module catalog** (`public.module_catalog`) — DB-backed registry of all available modules.
+- **Org module states** (`public.org_module_states`) — per-org enabled/disabled state.
+- **Toggle ownership** — **system admins only** (platform-level, not org admins). Future payment provisioning will write to the same table.
+- **System admins** are identified by `public.system_user_roles` (reuses `public.roles`).
+- Access primitives live in `lib/modules/server.ts`: `verifyModuleAccess`, `assertSystemAdmin`, `isModuleEnabledForOrg`.
+- The UI uses `useOrgModules` hook and `ModuleGuard` component for client-side gating.
+- **Adding new modules:** see **`modules/DEVELOPER_MANUAL.md`** for the full process (how DB links to code, step-by-step, and checklist).
+- **TypeScript:** When branching on module keys, use exhaustive `switch` with `default: never` so adding a new module key forces all branches to be updated (see .cursorrules and DEVELOPER_MANUAL).
+
+Current modules in the catalog:
+
+| Key | is_core | default_enabled_for_new_orgs |
+|---|---|---|
+| `KNOWLEDGE` | true | true |
+| `SKILLS` | false | false |
+| `CREWS` | false | false |
+
 ### Tech & Architecture Intent
 
 - **Orchestration / agents**

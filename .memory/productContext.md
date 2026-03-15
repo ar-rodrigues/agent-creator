@@ -144,7 +144,18 @@ This section focuses on **product behavior**, not low‑level implementation.
     - Decomposing large analyses.
     - Having separate “analyst”, “checker”, and “writer” agents.
 
-#### 5. Organizations, members, and seats (planned Phase 1 behavior)
+#### 5. Module access and system administration
+
+- **Module toggling is system-level**: org admins cannot enable/disable modules. Only system admins (users in `public.system_user_roles`) can do so.
+- **System admin management page** (`/system/modules`): visible in the sidebar only for system admins. Shows all org × module states as a table with inline toggles. Future: payment system writes to the same `org_module_states` table with `source = 'billing'`.
+- **Module gating** is enforced in three layers:
+  1. **Sidebar navigation** (Server Component): links only shown when module enabled.
+  2. **Page / Server Component**: redirect to dashboard if module disabled.
+  3. **API routes**: `verifyModuleAccess` returns 403 if module disabled.
+- **ModuleGuard** (`modules/shared/ModuleGuard.tsx`): client-side wrapper that shows a localized "module disabled" state when `useOrgModules.isEnabled(key)` returns false.
+- **Adding a new module**: follow **`modules/DEVELOPER_MANUAL.md`** (step-by-step process, how DB links to code, and checklist).
+
+#### 6. Organizations, members, and seats (planned Phase 1 behavior)
 
 - **Create or join an organization** (planned)
   - When a user signs in for the first time, they can:

@@ -4,7 +4,10 @@
     "dashboard": "Panel",
     "profile": "Perfil",
     "knowledge": "Conocimiento",
+    "skills": "Habilidades",
+    "crews": "Equipos",
     "orgSettings": "Config. organización",
+    "systemAdmin": "Admin. sistema",
     "signOut": "Cerrar sesión",
     "home": "Inicio",
     "copyright": "© {year} Agent Creator",
@@ -151,6 +154,28 @@
     "emailUpdateSent": "Revisa tu correo para confirmar la nueva dirección.",
     "emailUpdated": "Correo actualizado",
     "emailUpdateFailed": "Error al actualizar el correo"
+  },
+  "modules": {
+    "disabled": "Este módulo no está habilitado para tu organización.",
+    "disabledContactAdmin": "Contacta al administrador del sistema para activar esta función."
+  },
+  "systemAdmin": {
+    "title": "Admin. sistema",
+    "modulesTitle": "Gestión de módulos",
+    "loading": "Cargando…",
+    "noModules": "No se encontraron módulos.",
+    "organization": "Organización",
+    "moduleKey": "Módulo",
+    "enabled": "Habilitado",
+    "disabled": "Deshabilitado",
+    "source": "Origen",
+    "updatedAt": "Última actualización",
+    "toggleSuccess": "Estado del módulo actualizado",
+    "toggleFailed": "Error al actualizar el estado del módulo",
+    "filterByOrg": "Filtrar por organización",
+    "filterByModule": "Filtrar por módulo",
+    "allOrgs": "Todas las organizaciones",
+    "allModules": "Todos los módulos"
   },
   "orgSettings": {
     "title": "Configuración de la organización",
