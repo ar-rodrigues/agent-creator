@@ -1,8 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { useTranslations } from "next-intl";
 import type { RagSource } from "@/hooks/useRagGeneral";
 import { SourceBadge } from "./SourceBadge";
+import styles from "./ChatMessage.module.css";
 
 export type ChatEntry = {
   role: "user" | "assistant";
@@ -68,6 +70,7 @@ const ASSISTANT_BUBBLE_STYLE: React.CSSProperties = {
 };
 
 export function ChatMessage({ entry }: ChatMessageProps) {
+  const t = useTranslations("knowledge");
   const { role, content, sources = [], documentNameMap = {} } = entry;
 
   if (role === "user") {
@@ -89,7 +92,10 @@ export function ChatMessage({ entry }: ChatMessageProps) {
       <div style={ASSISTANT_BUBBLE_STYLE}>
         <div style={{ whiteSpace: "pre-wrap" }}>
           {isEmpty ? (
-            <span style={{ color: "var(--color-text-muted)" }}>Thinking…</span>
+            <span className={styles.thinkingWrap} style={{ color: "var(--color-text-muted)" }}>
+              <span className={styles.thinkingSpinner} aria-hidden />
+              <span>{t("thinking")}</span>
+            </span>
           ) : (
             nodes
           )}

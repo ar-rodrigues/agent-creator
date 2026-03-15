@@ -31,6 +31,7 @@ type AskParams = {
   knowledgeSpaceIds?: string[];
   provider?: LlmProvider;
   messages?: ConversationMessage[];
+  locale?: string;
 };
 
 export type RagStreamCallbacks = {

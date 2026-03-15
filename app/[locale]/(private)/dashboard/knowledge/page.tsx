@@ -345,6 +345,7 @@ export default function KnowledgePage() {
         question: userQuestion,
         knowledgeSpaceIds: [],
         messages: messages.map((m) => ({ role: m.role, content: m.content })),
+        locale,
       },
       {
         signal: abortControllerRef.current.signal,
@@ -395,7 +396,7 @@ export default function KnowledgePage() {
         },
       },
     );
-  }, [askRagStreaming, currentOrgId, documentNameMap, messages, question, ragLoading]);
+  }, [askRagStreaming, currentOrgId, documentNameMap, locale, messages, question, ragLoading]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

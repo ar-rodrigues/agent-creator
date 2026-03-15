@@ -154,12 +154,12 @@ export async function POST(request: Request, { params }: RouteParams) {
       messages: [
         {
           role: "system",
-          content: "You output only a single line: Title: <5-8 word title>. Nothing else.",
+          content: `You output only a single line: Title: <5-8 word title>. Nothing else. You must write your entire response in ${languageName} only. Do not use any other language.`,
         },
         {
           role: "user",
           content: [
-            `In ${languageName}, give a concise title (5–8 words) for this document collection. Reply with exactly one line: Title: <title>`,
+            `In ${languageName}, give a concise title (5–8 words) for this document collection. Your title must be written entirely in ${languageName}. Reply with exactly one line: Title: <title>`,
             "",
             "Excerpts:",
             contextSnippet.slice(0, 2000),
@@ -187,12 +187,12 @@ export async function POST(request: Request, { params }: RouteParams) {
         {
           role: "system",
           content:
-            "You write only a summary paragraph. Output exactly one line starting with 'Summary: ' followed by 3 to 5 complete sentences. The paragraph must end with a period. Do not stop mid-sentence. Your summary must be at least 150 characters.",
+            `You write only a summary paragraph. Output exactly one line starting with 'Summary: ' followed by 3 to 5 complete sentences. The paragraph must end with a period. Do not stop mid-sentence. Your summary must be at least 150 characters. You must write your entire response in ${languageName} only. Do not use any other language.`,
         },
         {
           role: "user",
           content: [
-            `In ${languageName}, write a 3–5 sentence paragraph summarizing the main topics and value of this document collection. Your reply must be exactly: Summary: <your paragraph>`,
+            `In ${languageName}, write a 3–5 sentence paragraph summarizing the main topics and value of this document collection. Your summary paragraph must be written entirely in ${languageName}. Every sentence must be in ${languageName}. Your reply must be exactly: Summary: <your paragraph>`,
             "",
             "Excerpts:",
             summaryContext,

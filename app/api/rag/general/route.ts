@@ -13,6 +13,11 @@ import {
 
 const RESERVED_OUTPUT_TOKENS = 4096;
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  es: "Spanish",
+  en: "English",
+};
+
 type ConversationMessage = { role: "user" | "assistant"; content: string };
 
 type GeneralRagRequest = {
@@ -21,6 +26,7 @@ type GeneralRagRequest = {
   knowledgeSpaceIds?: string[];
   provider?: LlmProvider;
   messages?: ConversationMessage[];
+  locale?: string;
 };
 
 export async function POST(request: Request) {
@@ -39,6 +45,8 @@ export async function POST(request: Request) {
   const knowledgeSpaceIds = body?.knowledgeSpaceIds ?? [];
   const requestedProvider = body?.provider;
   const conversationHistory = body?.messages ?? [];
+  const locale = typeof body?.locale === "string" ? body.locale : "en";
+  const languageName = LANGUAGE_NAMES[locale] ?? "English";
 
   if (!orgId || !question) {
     return NextResponse.json(
@@ -112,7 +120,7 @@ export async function POST(request: Request) {
 
   const systemPrompt = [
     "You are an assistant that answers questions using the provided organization knowledge.",
-    "Always answer in the same language as the user's question (e.g. if the question is in Spanish, respond in Spanish; if in English, respond in English).",
+    `The user's interface is set to ${languageName}. You must respond only in ${languageName}.`,
     "Use the context sections below to answer factually.",
     "If the answer is not contained in the context, say you do not know rather than inventing details.",
     "Each context section is numbered starting at 1.",
