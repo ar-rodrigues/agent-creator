@@ -1,6 +1,6 @@
 ## Progress State – Agent & Skill Creator
 
-**Last updated:** 2025-03-12 — Memory synced with uncommitted changes: RAG General QA on Knowledge page, org provider secrets UI, extended RAG retrieval; git history: layout/i18n refactor, .gitignore updates, config/deps, initial commit.
+**Last updated:** 2025-03-15 — Memory synced with recent commits: Knowledge page (streaming QA, context token usage, localized summaries, reindex status); Org settings (embedding dimension config, reindex flow); embeddings concurrency/retry; layout i18n.
 
 ### Current State
 
@@ -11,60 +11,31 @@ The project has:
   - Theming (light / dark / system) via a `ThemeProvider` and design tokens.
   - Supabase‑based authentication and a basic private dashboard area.
 - A **Memory Bank skill** and `.cursorrules` that expect this `.memory/` folder.
-- This iteration of the Memory Bank aligned with the **agent + skill + knowledge space** vision (not just the current Next.js implementation details).
+- **Knowledge** and **Org settings** flows are implemented with streaming QA, reindexing, localized summaries, and configurable embedding dimensions (see Recently Completed).
 
 ### Recently Completed
 
-- **Memory Bank & vision alignment**
-  - Re‑created `.memory/projectBrief.md` to focus on:
-    - The product as an **Agent & Skill Creator**.
-    - Explicit concepts of **Skills**, **Agents**, and **Knowledge spaces** (general, project, agent).
-    - RAG and CrewAI as core building blocks.
-  - Re‑created `.memory/productContext.md` to describe:
-    - Flows for **managing knowledge spaces and files**.
-    - Flows for **creating/editing skills** (reusable tools with scope).
-    - Flows for **creating/editing agents** (skills + knowledge spaces).
-    - How single‑agent and multi‑agent (crew) runs should behave.
-  - Set up `.memory/progressState.md` and `.memory/activeContext.md` again so they track high‑level progress and the current task.
+- **Knowledge page (`/dashboard/knowledge`)**
+  - **General QA chat**: Streaming support (`/api/rag/general/stream`), stop button, optional knowledge space selection, provider choice (local / gemini / claude). Uses `useRagGeneral` with `askStreaming`; `ChatMessage` and `SourceBadge` for display.
+  - **Context token usage**: Token estimation (`lib/utils/tokens.ts`, `estimateTokens`, `CONTEXT_WINDOW_MAX_TOKENS`) and tooltip showing context usage so users stay within model limits.
+  - **Localized summaries**: Knowledge spaces have `summary_i18n` (per locale); summary generation via `POST /api/knowledge-spaces/[spaceId]/summary` with `locale`; concurrency guard to prevent duplicate summary updates per space/locale; refresh from UI.
+  - **Reindex status**: Reindex progress shown in UI; `ReindexContext` provides `isReindexing`, `total`, `done`; reindex triggered when org embedding config changes.
+  - **Components**: `KnowledgeOverview` (title/summary from first general space), `ChatMessage`, `SourceBadge`; layout/scrollbar and button style refinements; all strings from translation files.
 
-- **App shell (from earlier work)**
-  - Public/private layouts, auth flows, i18n, theming, and basic dashboard shell are in place to host the future agent/skill/knowledge UI.
+- **Org settings (`/org/settings`)**
+  - **Embedding dimension configuration**: UI and API support for configurable embedding dimensions; model registry exposes `dimension`, `dimensionConfigurable`, `allowedDimensions`; org config stores `embeddingDimension`; dimension selector in settings when the chosen embedding model supports it.
+  - **Model configuration**: Chat and embedding provider/model selectors from `/api/orgs/[orgId]/models`; mode filter (local / cloud / mixed); provider secrets (OpenAI, Anthropic, Google) via `useOrgProviderSecrets` and `org_provider_secrets` table.
+  - **Reindex flow**: On embedding config save, reindex runs in background via `ReindexProvider` (reindex-pending → reembed per document → reindex-complete); `reindex-finished` custom event refreshes model config so status goes from `in_progress` to `idle`.
 
-- **Orgs, seats & permissions (Phase 1 implementation)**
-  - Added Supabase migrations (and applied them via `user-supabase` MCP) for:
-    - `organizations`, `org_memberships`, `permission_codes`, `seat_types`, `seat_type_permissions`, `org_seats`, and `seat_assignments` with RLS and an organization‑creator trigger.
-    - `projects`, `knowledge_spaces`, `documents`, `document_knowledge_spaces`, and `document_chunks` with org‑scoped RLS.
-    - A private `documents` storage bucket with org‑scoped policies based on `public.is_org_member_for_storage_path`.
-    - Foundational tables for `agents`, `skills`, `agent_skills`, and `agent_knowledge_spaces` with org‑scoped RLS.
-  - Implemented permission helpers (`lib/permissions.ts`) and API endpoints:
-    - `/api/permissions`, `/api/orgs`, `/api/knowledge-spaces`, `/api/documents/upload`.
-  - Implemented org‑aware frontend flows:
-    - Org creation page and flow, plus an organization selector in `PrivateHeader`.
-    - Dashboard behavior that requires an org and exposes a **Knowledge** section per org.
-  - Built initial knowledge UI:
-    - `useKnowledgeSpaces` hook and `/dashboard/knowledge` page to list and create knowledge spaces.
-    - File upload flow that stores documents in the `documents` bucket and links them to knowledge spaces.
-  - Added an org‑scoped RAG retrieval stub in `lib/rag/retrieve.ts` that fetches chunks from `document_chunks` filtered by `org_id` and knowledge spaces.
+- **Backend / embeddings**
+  - **Embeddings pipeline**: `lib/rag/embeddings.ts` with custom concurrency limiter (p-limit upgrade), retry logic for rate limits, dynamic concurrency from API capabilities.
+  - **APIs**: `POST /api/documents/[documentId]/reembed`, `GET /api/orgs/[orgId]/reindex-pending`, `POST /api/orgs/[orgId]/reindex-complete`; model config and summary routes updated for dimension and locale.
 
-- **Org-level model configuration & soft RAG migration**
-  - Added an `org_model_configs` table and `lib/llm/orgConfig.ts` helper to store per‑org chat and embedding settings plus embedding versions.
-  - Extended `document_chunks` with `embedding_version` and `embedding_model` metadata and added indexes to support per‑version retrieval.
-  - Updated RAG helpers and `/api/rag/general` to:
-    - Resolve the org’s chat provider/model and embedding version from `org_model_configs`.
-    - Always query embeddings using the org’s active version.
-  - Added an `embedding_models` registry table that records provider, model name, kind (chat vs embedding), vector dimension, and whether a model is local or cloud, seeded with current local Ollama models (`nomic-embed-text:latest`, `mxbai-embed-large:latest`, `deepseek-r1:8b`, `phi4-mini:latest`).
-  - Introduced backend helpers to:
-    - Discover installed Ollama models at runtime.
-    - Expose available chat and embedding models via an org-scoped `/api/orgs/[orgId]/models` endpoint, filtering out disabled or missing local models.
-  - Refined the Org settings UI “Models & embeddings” section to:
-    - Use dropdown selectors populated from the backend model registry instead of free-text inputs.
-    - Provide a configuration mode toggle (local / cloud / mixed) that filters available options.
-    - Explain the difference between chat models (answer generation) and embedding models (indexing/search with fixed dimensions).
-  - **RAG general QA UI and provider secrets**
-    - Added **General QA** card on the Knowledge page (`/dashboard/knowledge`): users can ask a question, optionally select general knowledge spaces, choose provider (local / gemini / claude), and see answer + sources; powered by `useRagGeneral` and `/api/rag/general`.
-    - Extended RAG retrieval (`lib/rag/retrieve.ts`) with version-aware chunk fetching and optional similarity/score handling.
-    - Added **Org provider secrets** for external LLM APIs: `org_provider_secrets` table (encrypted API keys, `api_key_last4` for display), `useOrgProviderSecrets` hook, and Org settings UI to manage provider API keys (e.g. for Gemini, Claude).
-    - Document upload route and RAG flow updated as needed for current schema.
+- **Layout & i18n**
+  - Layout loads messages dynamically; sidebar styling improvements; dashboard, knowledge, and org settings pages use `next-intl` for all user-facing strings (en/es).
+
+- **Earlier work (still current)**
+  - Memory Bank & vision alignment; app shell; orgs, seats & permissions (migrations, RLS, storage, APIs); org-level model config & soft RAG migration; RAG general QA and provider secrets; document upload with embedding support.
 
 ### Next
 
@@ -102,9 +73,9 @@ The project has:
 
 ### Immediately next (concrete actions)
 
-- Implement the first end‑to‑end **chunking + embeddings** pipeline for uploaded documents and store embeddings in `document_chunks`.
-- Extend the existing RAG retrieval stub to perform similarity search over embeddings, filtered by org and selected knowledge spaces.
-- Add a minimal **documents/knowledge space detail** view in the dashboard to surface indexing status and basic metadata.
+- Extend RAG retrieval to full **similarity search** over embeddings (top‑k, org + knowledge spaces + version‑aware); chunking and reembed pipeline are in place.
+- Add a minimal **documents/knowledge space detail** view in the dashboard to surface indexing status, chunk counts, and basic metadata.
+- Consider Phase 2 (skills registry and LLM abstraction) once retrieval is solidified.
 
 ## Progress State – Agent Creator
 

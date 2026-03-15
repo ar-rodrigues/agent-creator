@@ -75,6 +75,7 @@ This section focuses on **product behavior**, not low‑level implementation.
   - For each space, the user:
     - Names it, describes purpose.
     - Attaches or removes files.
+  - Spaces can have **localized summaries** (per locale); summaries are generated/refreshed from the UI. Document upload triggers chunking and embedding; changing org embedding model/dimension triggers a **reindex** (background re-embed of all org documents).
 
 - **Example**
   - General knowledge:
@@ -192,15 +193,18 @@ These behaviors are already implemented and reused by the future agent/skill/kno
   - It should always be clear **which knowledge spaces** an agent used for a run.
   - Users should be able to understand why an answer might be missing information (e.g. project space not attached).
 
-- **Model configuration per organization**
-  - The **Org settings** screen lets admins pick:
-    - A chat provider/model (local vs cloud) for answering, chosen from a backend registry (no free text).
-    - An embedding provider/model for indexing and retrieval, also chosen from the registry and constrained to compatible dimensions.
-  - The backend maintains an `embedding_models` table that records, per model:
-    - Provider (`ollama`, `supabase`, `openai`, etc.), name, kind (chat vs embedding), vector dimension, and whether it is local or cloud.
-    - The Org Settings UI calls an API that combines this registry with runtime Ollama discovery so only installed, enabled local models appear in selectors.
-  - Changes to embedding configuration trigger a background **reindex** for that organization’s documents.
-  - During reindexing, RAG continues to use the **previous embedding version** so users can keep working; once reindex completes, the org switches to the new version and the oldest version is discarded (keeping at most two).
+- **Knowledge page (current implementation)**
+  - **General QA chat**: Users ask questions over org knowledge; optional selection of general knowledge spaces; provider choice (local / Gemini / Claude). Responses stream in real time with a stop button. Answers show sources (document/space/chunk). Implemented via `useRagGeneral` (`askStreaming`), `/api/rag/general` and `/api/rag/general/stream`.
+  - **Context usage**: Token estimation for the conversation (question + messages) is shown (e.g. tooltip) so users stay within the model’s context window (`lib/utils/tokens.ts`, `CONTEXT_WINDOW_MAX_TOKENS`).
+  - **Knowledge space summaries**: Each space can have **localized summaries** (`summary_i18n` by locale). Summary is generated/refreshed via `POST /api/knowledge-spaces/[spaceId]/summary` with a locale; the UI prevents concurrent summary updates for the same space/locale. The first general space’s summary drives the Knowledge overview title/summary.
+  - **Reindex status**: When the org’s embedding config changes, a background reindex runs. The UI shows reindex progress (e.g. via `ReindexContext`: `isReindexing`, `total`, `done`). Reindex flow: reindex-pending → reembed per document → reindex-complete; on finish, a `reindex-finished` event refreshes model config so status goes to idle.
+
+- **Org settings (current implementation)**
+  - **Model configuration**: Chat and embedding provider/model chosen from backend registry (no free text). Mode filter (local / cloud / mixed). Org Settings uses `/api/orgs/[orgId]/models` (registry + Ollama discovery).
+  - **Embedding dimension**: When the selected embedding model supports it (`dimensionConfigurable`, `allowedDimensions`), the UI lets admins set the **embedding dimension**; org config stores `embeddingDimension`. Changing embedding config (including dimension) triggers the reindex flow above.
+  - **Provider secrets**: API keys for external providers (OpenAI, Anthropic, Google) are stored in `org_provider_secrets` (encrypted); UI to set/clear keys; `api_key_last4` for display. Used by RAG/chat when provider is not local.
+  - **Reindex status**: Same reindex progress display as on the Knowledge page (shared `ReindexContext`).
+  - The backend `embedding_models` table records provider, name, kind (chat vs embedding), vector dimension (and dimension configurability), and locality. Changes to embedding config trigger background reindex; RAG uses the previous embedding version until reindex completes (at most two versions per org).
 
 - **Auditability (future)**
   - For more advanced users, we may expose:

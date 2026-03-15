@@ -68,8 +68,8 @@ The long‑term goal is that a user can upload files, define reusable skills, co
     - At most **two versions** are kept per org (current + previous) to support soft migrations.
     - RAG retrieval always uses the org’s active embedding version; previous versions are only kept temporarily during reindexing.
   - An `embedding_models` registry table tracks supported models:
-    - Columns include provider (e.g. `ollama`, `supabase`, `openai`), name, kind (`embedding` or `chat`), dimension, and locality (`is_local`).
-    - Org-level model config chooses from this registry; free-text model names are not exposed in the UI.
+    - Columns include provider (e.g. `ollama`, `supabase`, `openai`), name, kind (`embedding` or `chat`), dimension, dimension configurability, and locality (`is_local`).
+    - Org-level model config chooses from this registry (and, when supported, the embedding dimension); free-text model names are not exposed in the UI. Changing embedding config triggers a background reindex for that org’s documents.
   - Current local models registered for development:
     - `nomic-embed-text:latest` – local embedding model (Ollama, 768D).
     - `mxbai-embed-large:latest` – local embedding model (Ollama, 1024D).

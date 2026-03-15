@@ -2,23 +2,14 @@
 
 ### Current Task
 
-**Phase 1 follow‑ups:** Implement the first end‑to‑end **document chunking and embeddings pipeline** for uploaded documents; extend RAG retrieval to full similarity search over embeddings (org + knowledge spaces + version-aware). Add a minimal **documents/knowledge space detail** view for indexing status. Org‑level model configuration, model registry, provider secrets, and General QA on the Knowledge page are already in place.
+**Phase 1 – Knowledge & org settings are implemented.** Recent work (see last 10+ commits) added: Knowledge page (streaming QA chat, context token usage, localized summaries, reindex status); Org settings (embedding dimension config, reindex flow, provider secrets, model config); embeddings concurrency/retry; layout i18n. **Next focus:** Extend RAG retrieval to full similarity search; optionally add a documents/knowledge space detail view for indexing status. Skills layer (Phase 2) and agents/crews (Phase 3) follow.
 
 ### Focus / Notes
 
-- The Memory Bank now:
-  - Describes the product as an **Agent & Skill Creator** with:
-    - **Skills** (reusable tools).
-    - **Agents** (skills + knowledge spaces + instructions).
-    - **Knowledge spaces** (general, project, agent) that drive RAG.
-  - Mentions the use of **RAG**, **CrewAI**, **Ollama** (phi4‑mini, qwen2.5‑coder:3b), and **Supabase vector** at a conceptual level.
-  - Acknowledges existing Next.js/i18n/auth/theming shell as the UI host rather than the core of the product itself.
-  - Captures that each **organization** has its own model/embedding configuration (`org_model_configs`) backed by an `embedding_models` registry, and that RAG queries always route through this configuration and the org’s current embedding version.
-- The orgs/seats and **Phase 1 core** planning details are captured in `orgs-seats-and-phase1-core_*.plan.md`; the initial schema and API work for organizations and knowledge spaces has been implemented. **Database (Supabase):** `organizations`, `org_memberships`, `roles`, `org_model_configs`, `embedding_models`, `org_provider_secrets`, `knowledge_spaces`, `documents`, `document_chunks` (with `embedding_version`, `embedding_model`), `agents`, `skills`, `agent_skills`, `agent_knowledge_spaces`, plus permissions/seats tables. Local migrations under `supabase/migrations/` include 20260312_* for org_model_configs, embedding_models, document_chunks versioning, and org_provider_secrets.
-- Future tasks should:
-  - Update `progressState.md` when major features are implemented (knowledge spaces, skills registry, agent creator, crews, orgs/seats).
-  - Update this `activeContext.md` whenever the main focus shifts to a new feature area.
-  - Keep `projectBrief.md` and `productContext.md` synced with any large product or architecture decisions.
+- **Knowledge page** (`app/[locale]/(private)/dashboard/knowledge/`): Main page + `_components/ChatMessage.tsx`, `KnowledgeOverview.tsx`, `SourceBadge.tsx`. Uses `useRagGeneral` (ask + askStreaming), `useKnowledgeSpaces`, `useGeneralDocuments`; token estimation via `lib/utils/tokens.ts` (`estimateTokens`, `CONTEXT_WINDOW_MAX_TOKENS`). Summary refresh: `POST /api/knowledge-spaces/[spaceId]/summary` with concurrency guard per space/locale.
+- **Org settings** (`app/[locale]/(private)/org/settings/page.tsx`): Model config (chat + embedding), embedding dimension selector when model supports it, provider secrets (OpenAI/Anthropic/Google), reindex status. Hooks: `useOrgModelConfig`, `useOrgProviderSecrets`, `useReindex` from `ReindexContext`.
+- **Reindex flow**: `contexts/ReindexContext.tsx`; APIs: `reindex-pending`, `documents/[id]/reembed`, `reindex-complete`; `reindex-finished` event refreshes model config.
+- **Memory Bank:** projectBrief, productContext, progressState, and this file are up to date with knowledge + org settings as of 2025-03-15. Update progressState when shipping features; update activeContext when shifting focus; keep productContext/projectBrief aligned with product/architecture decisions.
 
 ## Active Context – Agent Creator
 
